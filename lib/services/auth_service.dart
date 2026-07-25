@@ -13,65 +13,151 @@ class AuthService {
     return '+$digits';
   }
 
+  /// Email interno (Appwrite exige email; el usuario nunca lo ve).
+  String _emailFromPhone(String phone) => '${_digits(phone)}@conecta.app';
+
+  /// Contraseña determinista y segura de 18 caracteres.
+  String _passwordFromPhone(String phone) {
+    final digits = _digits(phone);
+
+    int h1 = 0x811c9dc5;
+    for (int i = 0; i < digits.length; i++) {
+      h1 = (h1 ^ digits.codeUnitAt(i)) & 0xFFFFFFFF;
+      h1 = (h1 * 0x01000193) & 0xFFFFFFFF;
+    }
+
+    int h2 = 0;
+    for (int i = 0; i < digits.length; i++) {
+      h2 = ((h2 << 5) - h2 + digits.codeUnitAt(i)) & 0xFFFFFFFF;
+    }
+
+    final hex1 = h1.abs().toRadixString(16).padLeft(8, '0');
+    final hex2 = h2.abs().toRadixString(16).padLeft(8, '0');
+
+    return 'Cx$hex1$hex2';
+  }
+
+  /// Contraseña legacy alternativa por compatibilidad.
+  String _legacyPassword(String phone) {
+    final digits = _digits(phone);
+    int hash = 0;
+    for (int i = 0; i < digits.length; i++) {
+      hash = ((hash << 5) - hash + digits.codeUnitAt(i)) & 0xFFFFFFFF;
+    }
+    final hex = hash.abs().toRadixString(16);
+    return 'c\$${hex.padLeft(12, '0')}';
+  }
+
   Future<void> _clearExistingSession() async {
     try {
       await account.deleteSession(sessionId: 'current');
     } catch (_) {}
   }
 
-  /// Paso 1: Enviar código OTP al número de teléfono.
-  /// Retorna el userId que se necesita para verificar el código.
-  Future<String> sendOTP({required String phone}) async {
+  /// Inicia sesión directa usando solo el número de teléfono.
+  Future<Session> login({required String phone}) async {
+    final digits = _digits(phone);
+    final email = _emailFromPhone(digits);
     final normalized = normalizePhone(phone);
-    debugPrint('=== ENVIAR OTP ===');
-    debugPrint('Phone: $normalized');
+
+    debugPrint('=== LOGIN DIRECTO POR TELÉFONO ===');
+    debugPrint('Phone: $normalized, Email: $email');
 
     await _clearExistingSession();
 
-    try {
-      final token = await account.createPhoneToken(
-        userId: ID.unique(),
-        phone: normalized,
-      );
-      debugPrint('OTP enviado. UserId: ${token.userId}');
-      return token.userId;
-    } on AppwriteException catch (e) {
-      debugPrint('Error enviando OTP: [${e.code}] ${e.message}');
-      throw Exception(_friendlyError(e));
+    final passwords = [
+      _passwordFromPhone(phone),
+      _legacyPassword(phone),
+    ];
+
+    AppwriteException? lastError;
+
+    for (final password in passwords) {
+      try {
+        final session = await account.createEmailPasswordSession(
+          email: email,
+          password: password,
+        );
+
+        final user = await account.get();
+        await ensureUserProfile(
+          userId: user.$id,
+          name: user.name.isNotEmpty ? user.name : 'Usuario',
+          phone: normalized,
+        );
+
+        debugPrint('Login exitoso: ${user.$id}');
+        return session;
+      } on AppwriteException catch (e) {
+        lastError = e;
+        continue;
+      }
     }
+
+    throw Exception(_friendlyError(lastError ?? AppwriteException('Invalid credentials'), isRegister: false));
   }
 
-  /// Paso 2: Verificar el código OTP e iniciar sesión.
-  Future<Session> verifyOTP({
-    required String userId,
-    required String otp,
+  /// Registra e inicia sesión directa usando nombre + teléfono.
+  Future<User> register({
+    required String name,
+    required String phone,
   }) async {
-    debugPrint('=== VERIFICAR OTP ===');
-    debugPrint('UserId: $userId, OTP: $otp');
+    final digits = _digits(phone);
+    final email = _emailFromPhone(digits);
+    final password = _passwordFromPhone(digits);
+    final normalized = normalizePhone(phone);
+
+    debugPrint('=== REGISTRO DIRECTO POR TELÉFONO ===');
+    debugPrint('Name: $name, Phone: $normalized, Email: $email');
+
+    await _clearExistingSession();
+
+    late User user;
 
     try {
-      final session = await account.createSession(
-        userId: userId,
-        secret: otp,
+      user = await account.create(
+        userId: ID.unique(),
+        name: name,
+        email: email,
+        password: password,
       );
-      debugPrint('Sesión creada exitosamente');
-      return session;
+      debugPrint('Cuenta creada: ${user.$id}');
     } on AppwriteException catch (e) {
-      debugPrint('Error verificando OTP: [${e.code}] ${e.message}');
-      throw Exception(_friendlyError(e));
+      if (e.code == 409 ||
+          (e.message ?? '').toLowerCase().contains('already exists')) {
+        // Si la cuenta ya existe, iniciamos sesión directamente
+        debugPrint('El usuario ya existe, iniciando sesión automáticamente...');
+        await login(phone: normalized);
+        final current = await getCurrentUser();
+        if (current != null) {
+          await ensureUserProfile(
+            userId: current.$id,
+            name: name,
+            phone: normalized,
+          );
+          return current;
+        }
+      }
+      throw Exception(_friendlyError(e, isRegister: true));
     }
-  }
 
-  /// Guarda/actualiza el nombre del usuario después del login.
-  Future<void> updateUserName(String name) async {
+    // Iniciar sesión inmediatamente tras registrar
     try {
-      await account.updateName(name: name);
-    } catch (e) {
-      debugPrint('Error actualizando nombre: $e');
+      await account.createEmailPasswordSession(email: email, password: password);
+    } on AppwriteException catch (e) {
+      debugPrint('Error en sesión post-registro: ${e.message}');
     }
+
+    await ensureUserProfile(
+      userId: user.$id,
+      name: name,
+      phone: normalized,
+    );
+
+    return user;
   }
 
-  /// Crea el perfil en la DB si no existe.
+  /// Crea/asegura el perfil del usuario en la base de datos.
   Future<void> ensureUserProfile({
     required String userId,
     required String name,
@@ -83,10 +169,9 @@ class AuthService {
         collectionId: AppwriteConfig.usersCollectionId,
         documentId: userId,
       );
-      // Ya existe
       return;
     } on AppwriteException {
-      // No existe → crear
+      // No existe, se procede a crear
     }
 
     final data = {
@@ -104,7 +189,7 @@ class AuthService {
       });
       await account.updateName(name: name);
     } catch (e) {
-      debugPrint('prefs update: $e');
+      debugPrint('Error actualizando prefs: $e');
     }
 
     try {
@@ -135,33 +220,22 @@ class AuthService {
     }
   }
 
-  String _friendlyError(AppwriteException e) {
+  String _friendlyError(AppwriteException e, {required bool isRegister}) {
     final raw = (e.message ?? '').toLowerCase();
     final code = e.code;
 
-    debugPrint('Appwrite error [$code] msg=${e.message}');
-
-    if (raw.contains('rate limit') || code == 429) {
-      return 'Demasiados intentos. Espera un momento e intenta de nuevo.';
+    if (code == 409 || raw.contains('already exists')) {
+      return 'Este número ya está registrado. Inicia sesión.';
     }
-    if (raw.contains('network') ||
-        raw.contains('socket') ||
-        raw.contains('failed host lookup')) {
-      return 'Sin conexión. Revisa tu internet e intenta de nuevo.';
+    if (code == 401 || raw.contains('invalid credentials')) {
+      return isRegister
+          ? 'No se pudo crear la cuenta. Verifica tu número.'
+          : 'Número no registrado. ¡Regístrate primero!';
     }
-    if (raw.contains('invalid token') ||
-        raw.contains('invalid credentials') ||
-        code == 401) {
-      return 'Código incorrecto. Revisa e intenta de nuevo.';
+    if (raw.contains('network') || raw.contains('socket') || raw.contains('failed host lookup')) {
+      return 'Sin conexión a internet. Revisa tu red.';
     }
-    if (raw.contains('expired')) {
-      return 'El código expiró. Solicita uno nuevo.';
-    }
-    if (raw.contains('phone') && raw.contains('invalid')) {
-      return 'Número de teléfono inválido. Verifica el formato.';
-    }
-
-    return 'Error: ${e.message ?? 'Intenta de nuevo.'}';
+    return 'Error (${e.code}): ${e.message ?? 'Intenta de nuevo.'}';
   }
 
   Future<User?> getCurrentUser() async {
@@ -178,9 +252,7 @@ class AuthService {
         databaseId: AppwriteConfig.databaseId,
         collectionId: AppwriteConfig.usersCollectionId,
         documentId: userId,
-        data: {
-          'status': isOnline ? 'online' : 'offline',
-        },
+        data: {'status': isOnline ? 'online' : 'offline'},
       );
     } on AppwriteException {
       // Silently fail

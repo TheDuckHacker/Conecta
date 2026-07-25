@@ -12,14 +12,9 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _otpController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   final _authService = AuthService();
   bool _isLoading = false;
-
-  // Flujo: false = ingresando datos, true = ingresando código OTP
-  bool _otpSent = false;
-  String? _userId;
 
   String _selectedCountryCode = '+591';
   String _selectedFlag = '🇧🇴';
@@ -37,7 +32,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
-    _otpController.dispose();
     super.dispose();
   }
 
@@ -78,8 +72,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             isSelected ? FontWeight.bold : FontWeight.normal),
                   ),
                   trailing: isSelected
-                      ? const Icon(Icons.check_circle,
-                          color: Color(0xff37C8F2))
+                      ? const Icon(Icons.check_circle, color: Color(0xff37C8F2))
                       : null,
                   onTap: () {
                     setState(() {
@@ -97,8 +90,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  /// Paso 1: Enviar código OTP
-  Future<void> _onSendOTP() async {
+  Future<void> _onRegister() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
@@ -108,66 +100,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
           _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
       final fullPhone = '$_selectedCountryCode$localDigits';
 
-      final userId = await _authService.sendOTP(phone: fullPhone);
-
-      if (mounted) {
-        setState(() {
-          _otpSent = true;
-          _userId = userId;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('📩 Código enviado a tu teléfono'),
-            backgroundColor: Color(0xff37C8F2),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        final message = e.toString().replaceFirst('Exception: ', '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  /// Paso 2: Verificar código OTP y crear perfil
-  Future<void> _onVerifyOTP() async {
-    final otp = _otpController.text.trim();
-    if (otp.isEmpty || otp.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ingresa el código de 6 dígitos'),
-          backgroundColor: Colors.red,
-        ),
+      await _authService.register(
+        name: _nameController.text.trim(),
+        phone: fullPhone,
       );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      await _authService.verifyOTP(userId: _userId!, otp: otp);
-
-      // Guardar nombre y perfil
-      final name = _nameController.text.trim();
-      final localDigits =
-          _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
-      final fullPhone = '$_selectedCountryCode$localDigits';
-
-      await _authService.updateUserName(name);
-
-      final user = await _authService.getCurrentUser();
-      if (user != null) {
-        await _authService.ensureUserProfile(
-          userId: user.$id,
-          name: name,
-          phone: fullPhone,
-        );
-      }
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -187,14 +123,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  void _onBack() {
-    setState(() {
-      _otpSent = false;
-      _userId = null;
-      _otpController.clear();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -208,7 +136,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               child: Column(
                 children: [
                   const SizedBox(height: 50),
-                  // Ícono
                   Container(
                     width: 100,
                     height: 100,
@@ -222,162 +149,104 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             offset: const Offset(0, 10))
                       ],
                     ),
-                    child: Icon(
-                      _otpSent
-                          ? Icons.sms_rounded
-                          : Icons.person_add_rounded,
+                    child: const Icon(
+                      Icons.person_add_rounded,
                       size: 50,
-                      color: const Color(0xff37C8F2),
+                      color: Color(0xff37C8F2),
                     ),
                   ),
                   const SizedBox(height: 25),
-                  Text(
-                    _otpSent ? "Verificación" : "Crear Cuenta",
-                    style: const TextStyle(
+                  const Text(
+                    "Crear Cuenta",
+                    style: TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
                         color: Color(0xff222222)),
                   ),
                   const SizedBox(height: 10),
-                  Text(
-                    _otpSent
-                        ? "Ingresa el código que recibiste por SMS"
-                        : "Solo necesitas tu nombre y teléfono",
-                    style: const TextStyle(color: Colors.grey, fontSize: 15),
+                  const Text(
+                    "Solo necesitas tu nombre y teléfono",
+                    style: TextStyle(color: Colors.grey, fontSize: 15),
                   ),
                   const SizedBox(height: 35),
 
-                  if (!_otpSent) ...[
-                    // Campo de nombre
-                    _buildTextField(
-                      controller: _nameController,
-                      hint: "Nombre completo",
-                      icon: Icons.person_outline_rounded,
-                      validator: (v) => v == null || v.trim().isEmpty
-                          ? 'Ingresa tu nombre'
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
+                  _buildTextField(
+                    controller: _nameController,
+                    hint: "Nombre completo",
+                    icon: Icons.person_outline_rounded,
+                    validator: (v) => v == null || v.trim().isEmpty
+                        ? 'Ingresa tu nombre'
+                        : null,
+                  ),
+                  const SizedBox(height: 16),
 
-                    // Campo de teléfono
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.grey.withValues(alpha: 0.10),
-                              blurRadius: 15,
-                              offset: const Offset(0, 5))
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          GestureDetector(
-                            onTap: _showCountryPicker,
-                            child: Container(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
-                              child: Row(
-                                children: [
-                                  Text(_selectedFlag,
-                                      style: const TextStyle(fontSize: 22)),
-                                  const SizedBox(width: 4),
-                                  Text(_selectedCountryCode,
-                                      style: const TextStyle(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w600)),
-                                  Icon(Icons.arrow_drop_down,
-                                      color: Colors.grey.shade600, size: 20),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Container(
-                              width: 1,
-                              height: 30,
-                              color: Colors.grey.shade300),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _phoneController,
-                              keyboardType: TextInputType.phone,
-                              validator: (v) {
-                                if (v == null || v.trim().isEmpty) {
-                                  return 'Ingresa tu número';
-                                }
-                                if (v.trim().length < 8) {
-                                  return 'Mínimo 8 dígitos';
-                                }
-                                return null;
-                              },
-                              style: const TextStyle(fontSize: 16),
-                              decoration: const InputDecoration(
-                                hintText: "Número de teléfono",
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(
-                                    vertical: 18, horizontal: 12),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                            color: Colors.grey.withValues(alpha: 0.10),
+                            blurRadius: 15,
+                            offset: const Offset(0, 5))
+                      ],
                     ),
-                  ] else ...[
-                    // Campo de código OTP
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.grey.withValues(alpha: 0.10),
-                              blurRadius: 15,
-                              offset: const Offset(0, 5))
-                        ],
-                      ),
-                      child: TextFormField(
-                        controller: _otpController,
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        maxLength: 6,
-                        style: const TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 12),
-                        decoration: const InputDecoration(
-                          hintText: "------",
-                          hintStyle:
-                              TextStyle(letterSpacing: 12, color: Colors.grey),
-                          border: InputBorder.none,
-                          counterText: '',
-                          contentPadding: EdgeInsets.symmetric(
-                              vertical: 18, horizontal: 20),
+                    child: Row(
+                      children: [
+                        GestureDetector(
+                          onTap: _showCountryPicker,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Row(
+                              children: [
+                                Text(_selectedFlag,
+                                    style: const TextStyle(fontSize: 22)),
+                                const SizedBox(width: 4),
+                                Text(_selectedCountryCode,
+                                    style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600)),
+                                Icon(Icons.arrow_drop_down,
+                                    color: Colors.grey.shade600, size: 20),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
+                        Container(
+                            width: 1, height: 30, color: Colors.grey.shade300),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _phoneController,
+                            keyboardType: TextInputType.phone,
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) {
+                                return 'Ingresa tu número';
+                              }
+                              if (v.trim().length < 8) {
+                                return 'Mínimo 8 dígitos';
+                              }
+                              return null;
+                            },
+                            style: const TextStyle(fontSize: 16),
+                            decoration: const InputDecoration(
+                              hintText: "Número de teléfono",
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(
+                                  vertical: 18, horizontal: 12),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    GestureDetector(
-                      onTap: _isLoading ? null : _onSendOTP,
-                      child: const Text(
-                        "¿No recibiste el código? Reenviar",
-                        style: TextStyle(
-                            color: Color(0xff37C8F2),
-                            fontWeight: FontWeight.w500,
-                            fontSize: 14),
-                      ),
-                    ),
-                  ],
+                  ),
 
                   const SizedBox(height: 40),
 
-                  // Botón principal
                   SizedBox(
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton(
-                      onPressed: _isLoading
-                          ? null
-                          : (_otpSent ? _onVerifyOTP : _onSendOTP),
+                      onPressed: _isLoading ? null : _onRegister,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xff37C8F2),
                         disabledBackgroundColor:
@@ -391,33 +260,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               height: 24,
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2))
-                          : Text(
-                              _otpSent
-                                  ? "Verificar Código"
-                                  : "Enviar Código",
-                              style: const TextStyle(
+                          : const Text(
+                              "Crear Cuenta",
+                              style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold)),
                     ),
                   ),
-
-                  // Botón volver (si está en OTP)
-                  if (_otpSent) ...[
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: TextButton(
-                        onPressed: _onBack,
-                        child: const Text("← Cambiar número",
-                            style: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w500)),
-                      ),
-                    ),
-                  ],
 
                   const SizedBox(height: 25),
                   Row(
