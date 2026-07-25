@@ -213,9 +213,8 @@ class _ChatsTabState extends State<ChatsTab> {
           .contains(_searchQuery.toLowerCase());
     }).toList();
 
-    // Si tiene contactos guardados, filtrar sus contactos; de lo contrario, mostrar lista general o mensaje
-    final displayList =
-        _contactUsers.isNotEmpty ? _contactUsers : _allAppwriteUsers;
+    // Mostrar únicamente la lista de contactos agregados por el usuario
+    final displayList = _contactUsers;
 
     final filteredContacts = displayList.where((user) {
       final name = (user.data['name'] ?? '').toString().toLowerCase();

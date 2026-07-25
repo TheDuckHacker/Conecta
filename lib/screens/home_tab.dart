@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:appwrite/models.dart';
+import 'package:conecta_lsb/services/auth_service.dart';
+import 'package:conecta_lsb/services/chat_service.dart';
+import 'package:conecta_lsb/services/contact_service.dart';
+import 'package:conecta_lsb/screens/chat_detail.dart';
+import 'package:conecta_lsb/screens/add_contact_screen.dart';
 
-class HomeTab extends StatelessWidget {
+class HomeTab extends StatefulWidget {
   final VoidCallback onStartCamera;
 
   const HomeTab({
@@ -9,9 +15,60 @@ class HomeTab extends StatelessWidget {
   });
 
   @override
+  State<HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<HomeTab> {
+  final _authService = AuthService();
+  final _chatService = ChatService();
+  final _contactService = ContactService();
+
+  User? _currentUser;
+  List<Document> _chats = [];
+  List<Document> _contactUsers = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    try {
+      _currentUser = await _authService.getCurrentUser();
+      if (_currentUser != null) {
+        // Cargar chats reales
+        _chats = await _chatService.getUserChats(_currentUser!.$id);
+
+        // Cargar contactos reales
+        final contactDocs = await _contactService.getContacts(_currentUser!.$id);
+        final List<Document> loadedContacts = [];
+        for (final doc in contactDocs) {
+          final contactUserId = doc.data['contactUserId']?.toString();
+          if (contactUserId != null) {
+            final userDoc = await _contactService.getUserById(contactUserId);
+            if (userDoc != null) {
+              loadedContacts.add(userDoc);
+            }
+          }
+        }
+        _contactUsers = loadedContacts;
+      }
+    } catch (e) {
+      debugPrint('Error cargando home tab: $e');
+    }
+    if (mounted) setState(() => _isLoading = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final userName = _currentUser?.name.isNotEmpty == true
+        ? _currentUser!.name
+        : 'Bienvenido';
+
     return Container(
-      color: Colors.transparent, // Transparent to let main gradient show
+      color: Colors.transparent,
       child: SafeArea(
         child: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
@@ -21,12 +78,12 @@ class HomeTab extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // GREETING
-                const Text(
-                  "¡Hola, Carla!",
-                  style: TextStyle(
+                Text(
+                  "¡Hola, $userName!",
+                  style: const TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xff121B35), // Dark primary text
+                    color: Color(0xff121B35),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -34,7 +91,7 @@ class HomeTab extends StatelessWidget {
                   "¿Qué quieres comunicar hoy?",
                   style: TextStyle(
                     fontSize: 16,
-                    color: Color(0xff5A6E85), // Grey secondary text
+                    color: Color(0xff5A6E85),
                   ),
                 ),
                 const SizedBox(height: 25),
@@ -55,7 +112,7 @@ class HomeTab extends StatelessWidget {
                 _buildRecentChatsHeader(),
                 const SizedBox(height: 15),
                 _buildRecentChatsList(),
-                
+
                 const SizedBox(height: 20),
               ],
             ),
@@ -88,13 +145,12 @@ class HomeTab extends StatelessWidget {
         children: [
           Row(
             children: [
-              // Glowing video icon container
               Container(
                 width: 60,
                 height: 60,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(18),
-                  color: const Color(0xff27C7D9), // Turquoise Accent
+                  color: const Color(0xff27C7D9),
                   boxShadow: [
                     BoxShadow(
                       color: const Color(0xff27C7D9).withValues(alpha: 0.25),
@@ -136,14 +192,13 @@ class HomeTab extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          // Action button
           SizedBox(
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
-              onPressed: onStartCamera,
+              onPressed: widget.onStartCamera,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xff27C7D9), // Turquoise
+                backgroundColor: const Color(0xff27C7D9),
                 foregroundColor: Colors.white,
                 elevation: 4,
                 shadowColor: const Color(0xff27C7D9).withValues(alpha: 0.25),
@@ -166,11 +221,11 @@ class HomeTab extends StatelessWidget {
   }
 
   Widget _buildRecentContactsHeader() {
-    return const Row(
+    return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          "CONTACTOS RECIENTES",
+        const Text(
+          "MIS CONTACTOS",
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.bold,
@@ -178,12 +233,21 @@ class HomeTab extends StatelessWidget {
             color: Color(0xff5A6E85),
           ),
         ),
-        Text(
-          "Ver todos",
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Color(0xff27C7D9),
+        GestureDetector(
+          onTap: () async {
+            final res = await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AddContactScreen()),
+            );
+            if (res == true) _loadData();
+          },
+          child: const Text(
+            "+ Agregar",
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Color(0xff27C7D9),
+            ),
           ),
         ),
       ],
@@ -191,73 +255,121 @@ class HomeTab extends StatelessWidget {
   }
 
   Widget _buildRecentContactsList() {
-    final contacts = [
-      {'name': 'Elena', 'avatar': 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150', 'active': true},
-      {'name': 'Mateo', 'avatar': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', 'active': false},
-      {'name': 'Sofía', 'avatar': 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150', 'active': false},
-      {'name': 'Ricardo', 'avatar': 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150', 'active': false},
-    ];
+    if (_isLoading) {
+      return const SizedBox(
+        height: 60,
+        child: Center(
+            child: CircularProgressIndicator(color: Color(0xff27C7D9))),
+      );
+    }
+
+    if (_contactUsers.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.person_add_rounded,
+                color: Color(0xff27C7D9), size: 24),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                "No tienes contactos agregados aún.",
+                style: TextStyle(color: Color(0xff5A6E85), fontSize: 13),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                final res = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AddContactScreen()),
+                );
+                if (res == true) _loadData();
+              },
+              child: const Text("Agregar",
+                  style: TextStyle(
+                      color: Color(0xff27C7D9), fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+    }
 
     return SizedBox(
-      height: 100,
+      height: 90,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
-        itemCount: contacts.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 20),
+        itemCount: _contactUsers.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 16),
         itemBuilder: (context, index) {
-          final contact = contacts[index];
-          final isActive = contact['active'] as bool;
-          return Column(
-            children: [
-              Stack(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: isActive ? const Color(0xff2ECC71) : Colors.transparent,
-                        width: 2,
-                      ),
-                    ),
-                    child: CircleAvatar(
-                      radius: 28,
+          final user = _contactUsers[index];
+          final name = user.data['name'] ?? 'Usuario';
+          final avatar = user.data['avatar'] ?? '';
+          final status = user.data['status'] ?? 'offline';
+          final isOnline = status == 'online';
+
+          return GestureDetector(
+            onTap: () => _startChat(user),
+            child: Column(
+              children: [
+                Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 26,
                       backgroundColor: const Color(0xffCDEFF7),
-                      backgroundImage: NetworkImage(contact['avatar'] as String),
-                      onBackgroundImageError: (_, __) {},
-                      child: Text(
-                        (contact['name'] as String)[0],
-                        style: const TextStyle(color: Color(0xff121B35), fontWeight: FontWeight.bold),
-                      ),
+                      backgroundImage:
+                          avatar.isNotEmpty ? NetworkImage(avatar) : null,
+                      onBackgroundImageError:
+                          avatar.isNotEmpty ? (_, __) {} : null,
+                      child: avatar.isEmpty
+                          ? Text(
+                              name.isNotEmpty ? name[0].toUpperCase() : '?',
+                              style: const TextStyle(
+                                color: Color(0xff27C7D9),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            )
+                          : null,
                     ),
-                  ),
-                  if (isActive)
-                    Positioned(
-                      bottom: 4,
-                      right: 4,
-                      child: Container(
-                        width: 14,
-                        height: 14,
-                        decoration: BoxDecoration(
-                          color: const Color(0xff2ECC71),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xffE5F7FF), width: 2),
+                    if (isOnline)
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: const Color(0xff2ECC71),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
                         ),
                       ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                contact['name'] as String,
-                style: const TextStyle(
-                  color: Color(0xff121B35),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: 60,
+                  child: Text(
+                    name,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xff121B35),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           );
         },
       ),
@@ -277,115 +389,132 @@ class HomeTab extends StatelessWidget {
   }
 
   Widget _buildRecentChatsList() {
-    final chats = [
-      {
-        'name': 'Elena Martínez',
-        'avatar': 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
-        'message': 'Hola',
-        'time': '14:30',
-        'active': true,
-        'sent': true,
-      },
-      {
-        'name': 'Mateo Silva',
-        'avatar': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-        'message': 'Enviado un mensaje',
-        'time': 'Ayer',
-        'active': true,
-        'sent': false,
-      },
-      {
-        'name': 'Comunidad Sordos GDL',
-        'avatar': 'https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?w=150',
-        'message': 'Juan: Bienvenidos a los nuevos miembros!',
-        'time': 'Martes',
-        'active': false,
-        'sent': false,
-      },
-    ];
+    if (_isLoading) {
+      return const SizedBox(
+        height: 60,
+        child: Center(
+            child: CircularProgressIndicator(color: Color(0xff27C7D9))),
+      );
+    }
+
+    if (_chats.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Column(
+          children: [
+            Icon(Icons.chat_bubble_outline_rounded,
+                color: Color(0xff5A6E85), size: 32),
+            SizedBox(height: 8),
+            Text(
+              "Sin conversaciones recientes",
+              style: TextStyle(
+                color: Color(0xff121B35),
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 4),
+            Text(
+              "Agrega un contacto para iniciar un chat.",
+              style: TextStyle(color: Color(0xff5A6E85), fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
 
     return ListView.separated(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: chats.length,
+      itemCount: _chats.length,
       separatorBuilder: (context, index) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final chat = chats[index];
-        final isActive = chat['active'] as bool;
-        final isSent = chat['sent'] as bool;
-        return Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-            border: Border.all(color: Colors.grey.shade100),
-          ),
-          child: Row(
-            children: [
-              // Chat avatar
-              Stack(
-                children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: const Color(0xffCDEFF7),
-                    backgroundImage: NetworkImage(chat['avatar'] as String),
-                    onBackgroundImageError: (_, __) {},
-                    child: Text(
-                      (chat['name'] as String)[0],
-                      style: const TextStyle(color: Color(0xff121B35), fontWeight: FontWeight.bold),
+        final chat = _chats[index];
+        final participants =
+            List<String>.from(chat.data['participants'] ?? []);
+        final otherUserId = participants.firstWhere(
+            (id) => id != _currentUser?.$id,
+            orElse: () => '');
+
+        return FutureBuilder<Document?>(
+          future: _getUserInfo(otherUserId),
+          builder: (context, snapshot) {
+            final otherUser = snapshot.data;
+            final name = otherUser?.data['name'] ?? 'Usuario';
+            final avatar = otherUser?.data['avatar'] ?? '';
+            final lastMessage = chat.data['lastMessage'] ?? '';
+            final updatedAt = chat.data['updatedAt']?.toString() ?? '';
+
+            return GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ChatDetailScreen(
+                      chatId: chat.$id,
+                      name: name,
+                      avatar: avatar,
+                      isActive: false,
+                      currentUserId: _currentUser!.$id,
                     ),
                   ),
-                  if (isActive)
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: Container(
-                        width: 14,
-                        height: 14,
-                        decoration: BoxDecoration(
-                          color: const Color(0xff2ECC71),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                        ),
-                      ),
+                ).then((_) => _loadData());
+              },
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
-                ],
-              ),
-              const SizedBox(width: 16),
-              // Message details
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  ],
+                  border: Border.all(color: Colors.grey.shade100),
+                ),
+                child: Row(
                   children: [
-                    Text(
-                      chat['name'] as String,
-                      style: const TextStyle(
-                        color: Color(0xff121B35),
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    CircleAvatar(
+                      radius: 24,
+                      backgroundColor: const Color(0xffCDEFF7),
+                      backgroundImage:
+                          avatar.isNotEmpty ? NetworkImage(avatar) : null,
+                      onBackgroundImageError:
+                          avatar.isNotEmpty ? (_, __) {} : null,
+                      child: avatar.isEmpty
+                          ? Text(
+                              name.isNotEmpty ? name[0].toUpperCase() : '?',
+                              style: const TextStyle(
+                                  color: Color(0xff121B35),
+                                  fontWeight: FontWeight.bold),
+                            )
+                          : null,
                     ),
-                    const SizedBox(height: 5),
-                    Row(
-                      children: [
-                        if (isSent) ...[
-                          const Icon(
-                            Icons.done_all_rounded,
-                            size: 16,
-                            color: Color(0xff27C7D9),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              color: Color(0xff121B35),
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                          const SizedBox(width: 4),
-                        ],
-                        Expanded(
-                          child: Text(
-                            chat['message'] as String,
+                          const SizedBox(height: 5),
+                          Text(
+                            lastMessage.toString().isEmpty
+                                ? 'Nueva conversación'
+                                : lastMessage.toString(),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -393,25 +522,70 @@ class HomeTab extends StatelessWidget {
                               fontSize: 14,
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 10),
+                    if (updatedAt.isNotEmpty)
+                      Text(
+                        _formatTime(updatedAt),
+                        style: const TextStyle(
+                          color: Color(0xffA8B8C0),
+                          fontSize: 12,
+                        ),
+                      ),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
-              // Time
-              Text(
-                chat['time'] as String,
-                style: const TextStyle(
-                  color: Color(0xffA8B8C0),
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
+  }
+
+  Future<void> _startChat(Document user) async {
+    if (_currentUser == null) return;
+    try {
+      Document? existingChat = await _chatService.findExistingChat(
+        participant1Id: _currentUser!.$id,
+        participant2Id: user.$id,
+      );
+
+      existingChat ??= await _chatService.createChat(
+        participant1Id: _currentUser!.$id,
+        participant2Id: user.$id,
+      );
+
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatDetailScreen(
+              chatId: existingChat!.$id,
+              name: user.data['name'] ?? 'Usuario',
+              avatar: user.data['avatar'] ?? '',
+              isActive: false,
+              currentUserId: _currentUser!.$id,
+            ),
+          ),
+        ).then((_) => _loadData());
+      }
+    } catch (e) {
+      debugPrint('Error starting chat: $e');
+    }
+  }
+
+  Future<Document?> _getUserInfo(String userId) async {
+    return await _contactService.getUserById(userId);
+  }
+
+  String _formatTime(String timestamp) {
+    try {
+      final dt = DateTime.parse(timestamp);
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return '';
+    }
   }
 }
