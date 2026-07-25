@@ -301,8 +301,8 @@ class _HomeTabState extends State<HomeTab> {
               ? rawName
               : (phone.isNotEmpty ? phone : 'Contacto');
           final avatar = user.data['avatar'] ?? '';
-          final status = user.data['status'] ?? 'offline';
-          final isOnline = status == 'online';
+          final status = (user.data['status'] ?? 'offline').toString();
+          final isOnline = AuthService.isOnlineStatus(status);
 
           return GestureDetector(
             onTap: () => _startChat(user),
@@ -454,7 +454,8 @@ class _HomeTabState extends State<HomeTab> {
                       chatId: chat.$id,
                       name: name,
                       avatar: avatar,
-                      isActive: (otherUser?.data['status'] ?? '') == 'online',
+                      isActive: AuthService.isOnlineStatus(
+                          (otherUser?.data['status'] ?? '').toString()),
                       currentUserId: _currentUser!.$id,
                       otherUserId: otherUserId.isNotEmpty ? otherUserId : null,
                     ),
@@ -561,7 +562,8 @@ class _HomeTabState extends State<HomeTab> {
               chatId: existingChat!.$id,
               name: user.data['name'] ?? 'Usuario',
               avatar: user.data['avatar'] ?? '',
-              isActive: (user.data['status'] ?? '') == 'online',
+              isActive: AuthService.isOnlineStatus(
+                  (user.data['status'] ?? '').toString()),
               currentUserId: _currentUser!.$id,
               otherUserId: user.$id,
             ),

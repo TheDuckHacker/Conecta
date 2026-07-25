@@ -197,9 +197,14 @@ class ContactService {
     return list;
   }
 
-  Future<Document?> getUserById(String userId) async {
+  Future<Document?> getUserById(
+    String userId, {
+    bool forceRefresh = false,
+  }) async {
     if (userId.isEmpty) return null;
-    if (_userCache.containsKey(userId)) return _userCache[userId];
+    if (!forceRefresh && _userCache.containsKey(userId)) {
+      return _userCache[userId];
+    }
 
     try {
       final doc = await databases.getDocument(
@@ -211,7 +216,7 @@ class ContactService {
       return doc;
     } on AppwriteException catch (e) {
       debugPrint('getUserById($userId): ${e.message}');
-      _userCache[userId] = null;
+      if (!forceRefresh) _userCache[userId] = null;
       return null;
     }
   }

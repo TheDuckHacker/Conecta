@@ -270,6 +270,15 @@ class AuthService {
     }
   }
 
+  /// Convención de `users.status`:
+  /// - online / offline
+  /// - typing:<chatId>  → escribiendo en ese chat (sigue contando como en línea)
+  static bool isOnlineStatus(String status) =>
+      status == 'online' || status.startsWith('typing:');
+
+  static bool isTypingInChat(String status, String chatId) =>
+      chatId.isNotEmpty && status == 'typing:$chatId';
+
   Future<void> setOnlineStatus(String userId, bool isOnline) async {
     try {
       await databases.updateDocument(
@@ -280,6 +289,21 @@ class AuthService {
       );
     } on AppwriteException {
       // Silently fail
+    }
+  }
+
+  /// Marca que el usuario está escribiendo en un chat (1 update liviano).
+  Future<void> setTypingStatus(String userId, String chatId) async {
+    if (userId.isEmpty || chatId.isEmpty) return;
+    try {
+      await databases.updateDocument(
+        databaseId: AppwriteConfig.databaseId,
+        collectionId: AppwriteConfig.usersCollectionId,
+        documentId: userId,
+        data: {'status': 'typing:$chatId'},
+      );
+    } on AppwriteException catch (e) {
+      debugPrint('setTypingStatus: ${e.message}');
     }
   }
 

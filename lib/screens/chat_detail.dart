@@ -5,6 +5,7 @@ import 'package:appwrite/models.dart';
 import 'package:appwrite/appwrite.dart' show RealtimeSubscription;
 import 'package:conecta_lsb/services/chat_service.dart';
 import 'package:conecta_lsb/services/contact_service.dart';
+import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/screens/video_call_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
@@ -34,18 +35,24 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final _scrollController = ScrollController();
   final _chatService = ChatService();
   final _contactService = ContactService();
+  final _authService = AuthService();
   final _focusNode = FocusNode();
   List<Document> _messages = [];
   bool _isLoading = true;
   bool _isSending = false;
   bool _isOnline = false;
+  bool _otherIsTyping = false;
+  bool _iAmTyping = false;
   String _chatId = '';
   final Set<String> _pairChatIds = {};
   RealtimeSubscription? _subscription;
   StreamSubscription? _realtimeListen;
   Timer? _pollTimer;
   Timer? _statusTimer;
+  Timer? _typingIdleTimer;
+  Timer? _typingHeartbeat;
   bool _isFetching = false;
+  bool _typingUpdateInFlight = false;
 
   static const _accent = Color(0xff37C8F2);
   static const _textDark = Color(0xff1A3A4A);
@@ -57,27 +64,24 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     super.initState();
     _chatId = widget.chatId;
     _isOnline = widget.isActive;
+    _messageController.addListener(_onComposeChanged);
     _initChat();
   }
 
   Future<void> _initChat() async {
     final otherId = widget.otherUserId;
     try {
-      // Siempre usar el chat canónico de la pareja (evita hilos duplicados).
       if (otherId != null && otherId.isNotEmpty) {
         final chat = await _chatService.resolveChat(
           userId: widget.currentUserId,
           otherUserId: otherId,
         );
         _chatId = chat.$id;
-        final pairIds = await _chatService.chatIdsForPair(
-          widget.currentUserId,
-          otherId,
-        );
+        // Solo IDs conocidos + canónico. Evita listar TODOS los chats otra vez.
         _pairChatIds
           ..clear()
-          ..addAll(pairIds)
           ..add(_chatId);
+        if (widget.chatId.isNotEmpty) _pairChatIds.add(widget.chatId);
       } else if (_chatId.isNotEmpty) {
         _pairChatIds
           ..clear()
@@ -87,7 +91,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       debugPrint('Error resolving chat: $e');
     }
 
-    // Primera carga: fusiona duplicados una sola vez.
     await Future.wait([
       _loadMessages(scroll: true, mergePair: true),
       _refreshOtherUserStatus(),
@@ -95,27 +98,97 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _subscribeToMessages();
   }
 
+  void _applyOtherStatus(String status) {
+    final online = AuthService.isOnlineStatus(status);
+    final typing = AuthService.isTypingInChat(status, _chatId);
+    if (!mounted) return;
+    if (online == _isOnline && typing == _otherIsTyping) return;
+    setState(() {
+      _isOnline = online;
+      _otherIsTyping = typing;
+    });
+  }
+
   Future<void> _refreshOtherUserStatus() async {
     final otherId = widget.otherUserId;
     if (otherId == null || otherId.isEmpty) return;
     try {
-      final user = await _contactService.getUserById(otherId);
-      final online = (user?.data['status'] ?? '') == 'online';
-      if (!mounted) return;
-      if (online != _isOnline) {
-        setState(() => _isOnline = online);
-      }
+      final user = await _contactService.getUserById(
+        otherId,
+        forceRefresh: true,
+      );
+      final status = (user?.data['status'] ?? '').toString();
+      _applyOtherStatus(status);
     } catch (e) {
       debugPrint('Error status: $e');
     }
   }
 
+  void _onComposeChanged() {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) {
+      _stopTyping();
+      return;
+    }
+    _startTyping();
+  }
+
+  void _startTyping() {
+    _typingIdleTimer?.cancel();
+    _typingIdleTimer = Timer(const Duration(seconds: 2), _stopTyping);
+
+    if (!_iAmTyping) {
+      _iAmTyping = true;
+      _pushTyping(true);
+      _typingHeartbeat?.cancel();
+      _typingHeartbeat = Timer.periodic(
+        const Duration(seconds: 3),
+        (_) {
+          if (_iAmTyping && _messageController.text.trim().isNotEmpty) {
+            _pushTyping(true);
+          }
+        },
+      );
+    }
+  }
+
+  void _stopTyping() {
+    _typingIdleTimer?.cancel();
+    _typingHeartbeat?.cancel();
+    if (!_iAmTyping) return;
+    _iAmTyping = false;
+    _pushTyping(false);
+  }
+
+  Future<void> _pushTyping(bool typing) async {
+    if (_typingUpdateInFlight || _chatId.isEmpty) return;
+    _typingUpdateInFlight = true;
+    try {
+      if (typing) {
+        await _authService.setTypingStatus(widget.currentUserId, _chatId);
+      } else {
+        await _authService.setOnlineStatus(widget.currentUserId, true);
+      }
+    } catch (_) {
+      // No bloquear UI
+    } finally {
+      _typingUpdateInFlight = false;
+    }
+  }
+
   @override
   void dispose() {
+    _messageController.removeListener(_onComposeChanged);
     _pollTimer?.cancel();
     _statusTimer?.cancel();
+    _typingIdleTimer?.cancel();
+    _typingHeartbeat?.cancel();
     _realtimeListen?.cancel();
     _subscription?.close();
+    // Limpiar "escribiendo" al salir (sin await)
+    if (_iAmTyping) {
+      _authService.setOnlineStatus(widget.currentUserId, true);
+    }
     _messageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -143,7 +216,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       List<Document> loaded;
       final otherId = widget.otherUserId;
 
-      // mergePair solo al abrir: después solo el chat canónico (rápido).
       if (mergePair && otherId != null && otherId.isNotEmpty) {
         loaded = await _chatService.getMessagesForPair(
           userId: widget.currentUserId,
@@ -198,12 +270,24 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (_chatId.isEmpty && _pairChatIds.isEmpty) return;
 
     try {
-      _subscription = _chatService.subscribeToMessages(_chatId);
+      _subscription = _chatService.subscribeToChat(
+        chatId: _chatId,
+        otherUserId: widget.otherUserId,
+      );
       _realtimeListen = _subscription!.stream.listen(
         (event) {
           if (!mounted) return;
           final payload = event.payload;
           if (payload.isEmpty) return;
+
+          // Evento del otro usuario (status / typing)
+          final docId = payload['\$id']?.toString();
+          if (docId != null &&
+              docId == widget.otherUserId &&
+              payload.containsKey('status')) {
+            _applyOtherStatus(payload['status']?.toString() ?? '');
+            return;
+          }
 
           final eventChatId = payload['chatId']?.toString();
           if (!_isRelevantChatId(eventChatId)) return;
@@ -218,7 +302,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             return;
           }
 
-          // Recarga liviana: solo el chat activo
           _loadMessages(scroll: true);
         },
         onError: (e) => debugPrint('Realtime error: $e'),
@@ -229,13 +312,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       debugPrint('No se pudo suscribir a realtime: $e');
     }
 
-    // Poll liviano (1 sola request). No fusionar pares en cada tick.
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    // Respaldo liviano: 1 request de mensajes cada 5s
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted) _loadMessages();
     });
 
-    // Estado online mucho menos frecuente
-    _statusTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+    // Typing/online: 1 getDocument cada 3s (barato)
+    _statusTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       if (mounted) _refreshOtherUserStatus();
     });
   }
@@ -256,6 +339,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (text.isEmpty || _isSending || _chatId.isEmpty) return;
 
     _messageController.clear();
+    _stopTyping();
     setState(() => _isSending = true);
 
     try {
@@ -283,10 +367,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         builder: (_) => VideoCallScreen(
           userName: widget.name,
           userAvatar: widget.avatar,
-          isVideoCall: true, // App LSB: siempre videollamada (señas)
+          isVideoCall: true,
         ),
       ),
     );
+  }
+
+  String get _statusLabel {
+    if (_otherIsTyping) return 'está escribiendo...';
+    if (_isOnline) return 'En línea';
+    return 'Desconectado';
   }
 
   @override
@@ -349,22 +439,31 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: _isOnline ? const Color(0xff2ECC71) : Colors.white70,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 1),
+                        if (!_otherIsTyping)
+                          Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(right: 6),
+                            decoration: BoxDecoration(
+                              color: _isOnline ? const Color(0xff2ECC71) : Colors.white70,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 1),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _isOnline ? 'En línea' : 'Desconectado',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                        Flexible(
+                          child: Text(
+                            _statusLabel,
+                            style: TextStyle(
+                              color: _otherIsTyping
+                                  ? Colors.white
+                                  : Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              fontStyle: _otherIsTyping
+                                  ? FontStyle.italic
+                                  : FontStyle.normal,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -372,7 +471,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ],
                 ),
               ),
-              // Solo videollamada (app para personas sordas / LSB)
               Tooltip(
                 message: 'Videollamada LSB',
                 child: IconButton(

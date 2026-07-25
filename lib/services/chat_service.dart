@@ -347,10 +347,20 @@ class ChatService {
     }
   }
 
-  RealtimeSubscription subscribeToMessages(String chatId) {
-    return realtime.subscribe([
+  /// Mensajes + (opcional) el documento del otro usuario (typing/online).
+  RealtimeSubscription subscribeToChat({
+    required String chatId,
+    String? otherUserId,
+  }) {
+    final channels = <String>[
       'databases.${AppwriteConfig.databaseId}.collections.${AppwriteConfig.messagesCollectionId}.documents',
-    ]);
+    ];
+    if (otherUserId != null && otherUserId.isNotEmpty) {
+      channels.add(
+        'databases.${AppwriteConfig.databaseId}.collections.${AppwriteConfig.usersCollectionId}.documents.$otherUserId',
+      );
+    }
+    return realtime.subscribe(channels);
   }
 
   Future<List<Document>> searchUsers(String query) async {
