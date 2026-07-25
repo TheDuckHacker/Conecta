@@ -38,22 +38,9 @@ class _HomeTabState extends State<HomeTab> {
     try {
       _currentUser = await _authService.getCurrentUser();
       if (_currentUser != null) {
-        // Cargar chats reales
+        _contactService.clearCache();
         _chats = await _chatService.getUserChats(_currentUser!.$id);
-
-        // Cargar contactos reales
-        final contactDocs = await _contactService.getContacts(_currentUser!.$id);
-        final List<Document> loadedContacts = [];
-        for (final doc in contactDocs) {
-          final contactUserId = doc.data['contactUserId']?.toString();
-          if (contactUserId != null) {
-            final userDoc = await _contactService.getUserById(contactUserId);
-            if (userDoc != null) {
-              loadedContacts.add(userDoc);
-            }
-          }
-        }
-        _contactUsers = loadedContacts;
+        _contactUsers = await _contactService.getContacts(_currentUser!.$id);
       }
     } catch (e) {
       debugPrint('Error cargando home tab: $e');
@@ -439,11 +426,8 @@ class _HomeTabState extends State<HomeTab> {
       separatorBuilder: (context, index) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final chat = _chats[index];
-        final participants =
-            List<String>.from(chat.data['participants'] ?? []);
-        final otherUserId = participants.firstWhere(
-            (id) => id != _currentUser?.$id,
-            orElse: () => '');
+        final otherUserId =
+            ChatService.otherParticipantId(chat, _currentUser!.$id);
 
         return FutureBuilder<Document?>(
           future: _getUserInfo(otherUserId),
@@ -451,9 +435,12 @@ class _HomeTabState extends State<HomeTab> {
             final otherUser = snapshot.data;
             final rawName = (otherUser?.data['name'] ?? '').toString();
             final rawPhone = (otherUser?.data['phone'] ?? '').toString();
-            final name = (rawName.isNotEmpty && rawName != 'Usuario')
+            var name = (rawName.isNotEmpty && rawName != 'Usuario')
                 ? rawName
                 : (rawPhone.isNotEmpty ? rawPhone : 'Contacto');
+            if (otherUserId.isEmpty || otherUserId == _currentUser!.$id) {
+              name = 'Contacto';
+            }
             final avatar = otherUser?.data['avatar'] ?? '';
             final lastMessage = chat.data['lastMessage'] ?? '';
             final updatedAt = chat.data['updatedAt']?.toString() ?? chat.data['lastMessageTime']?.toString() ?? '';
@@ -469,6 +456,7 @@ class _HomeTabState extends State<HomeTab> {
                       avatar: avatar,
                       isActive: false,
                       currentUserId: _currentUser!.$id,
+                      otherUserId: otherUserId.isNotEmpty ? otherUserId : null,
                     ),
                   ),
                 ).then((_) => _loadData());
@@ -575,6 +563,7 @@ class _HomeTabState extends State<HomeTab> {
               avatar: user.data['avatar'] ?? '',
               isActive: false,
               currentUserId: _currentUser!.$id,
+              otherUserId: user.$id,
             ),
           ),
         ).then((_) => _loadData());

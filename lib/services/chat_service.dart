@@ -4,10 +4,54 @@ import 'package:flutter/foundation.dart';
 import 'appwrite_config.dart';
 
 class ChatService {
+  static List<String> parseParticipants(dynamic raw) {
+    if (raw == null) return [];
+    if (raw is List) {
+      return raw.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+    }
+    if (raw is String && raw.isNotEmpty) {
+      return raw
+          .replaceAll('[', '')
+          .replaceAll(']', '')
+          .split(',')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    return [];
+  }
+
+  static String otherParticipantId(Document chat, String currentUserId) {
+    final parts = parseParticipants(chat.data['participants']);
+    for (final id in parts) {
+      if (id != currentUserId) return id;
+    }
+    return '';
+  }
+
+  static String _pairKey(String a, String b) {
+    final sorted = [a, b]..sort();
+    return '${sorted[0]}_${sorted[1]}';
+  }
+
   Future<Document> createChat({
     required String participant1Id,
     required String participant2Id,
   }) async {
+    if (participant1Id.isEmpty || participant2Id.isEmpty) {
+      throw Exception('Participantes inválidos');
+    }
+    if (participant1Id == participant2Id) {
+      throw Exception('No puedes crear un chat contigo mismo');
+    }
+
+    // Evitar duplicados
+    final existing = await findExistingChat(
+      participant1Id: participant1Id,
+      participant2Id: participant2Id,
+    );
+    if (existing != null) return existing;
+
     try {
       final chat = await databases.createDocument(
         databaseId: AppwriteConfig.databaseId,
@@ -36,6 +80,7 @@ class ChatService {
     required String senderId,
     required String text,
   }) async {
+    final now = DateTime.now().toIso8601String();
     try {
       await databases.createDocument(
         databaseId: AppwriteConfig.databaseId,
@@ -45,7 +90,7 @@ class ChatService {
           'chatId': chatId,
           'senderId': senderId,
           'text': text,
-          'timestamp': DateTime.now().toIso8601String(),
+          'timestamp': now,
         },
         permissions: [
           Permission.read(Role.any()),
@@ -60,7 +105,7 @@ class ChatService {
         documentId: chatId,
         data: {
           'lastMessage': text,
-          'lastMessageTime': DateTime.now().toIso8601String(),
+          'lastMessageTime': now,
         },
       );
     } on AppwriteException catch (e) {
@@ -76,21 +121,20 @@ class ChatService {
         queries: [
           Query.equal('chatId', chatId),
           Query.orderAsc('timestamp'),
-          Query.limit(100),
+          Query.limit(200),
         ],
       );
       return messages.documents;
     } on AppwriteException catch (e) {
       debugPrint('Error getMessages: ${e.message}');
-      // Fallback sin queries
       try {
         final all = await databases.listDocuments(
           databaseId: AppwriteConfig.databaseId,
           collectionId: AppwriteConfig.messagesCollectionId,
-          queries: [Query.limit(100)],
+          queries: [Query.limit(200)],
         );
         final filtered = all.documents
-            .where((m) => m.data['chatId'] == chatId)
+            .where((m) => m.data['chatId']?.toString() == chatId)
             .toList();
         filtered.sort((a, b) => (a.data['timestamp'] ?? '')
             .toString()
@@ -102,8 +146,10 @@ class ChatService {
     }
   }
 
+  /// Chats del usuario, **sin duplicados** (1 chat por pareja).
   Future<List<Document>> getUserChats(String userId) async {
-    // 1. Intentar consulta directa por participantes
+    List<Document> raw = [];
+
     try {
       final chats = await databases.listDocuments(
         databaseId: AppwriteConfig.databaseId,
@@ -113,46 +159,66 @@ class ChatService {
           Query.limit(100),
         ],
       );
-      if (chats.documents.isNotEmpty) {
-        return chats.documents;
-      }
+      raw = chats.documents;
     } catch (_) {}
 
-    try {
-      final chats = await databases.listDocuments(
-        databaseId: AppwriteConfig.databaseId,
-        collectionId: AppwriteConfig.chatsCollectionId,
-        queries: [
-          Query.search('participants', userId),
-          Query.limit(100),
-        ],
-      );
-      if (chats.documents.isNotEmpty) {
-        return chats.documents;
+    if (raw.isEmpty) {
+      try {
+        final allChats = await databases.listDocuments(
+          databaseId: AppwriteConfig.databaseId,
+          collectionId: AppwriteConfig.chatsCollectionId,
+          queries: [Query.limit(100)],
+        );
+        raw = allChats.documents.where((doc) {
+          return parseParticipants(doc.data['participants']).contains(userId);
+        }).toList();
+      } on AppwriteException catch (e) {
+        debugPrint('Error en getUserChats fallback: ${e.message}');
+        return [];
       }
-    } catch (_) {}
-
-    // 2. Fallback resiliente: Obtener lista de chats y filtrar en Dart
-    try {
-      final allChats = await databases.listDocuments(
-        databaseId: AppwriteConfig.databaseId,
-        collectionId: AppwriteConfig.chatsCollectionId,
-        queries: [Query.limit(100)],
-      );
-      final userChats = allChats.documents.where((doc) {
-        final parts = List<String>.from(doc.data['participants'] ?? []);
-        return parts.contains(userId);
-      }).toList();
-
-      userChats.sort((a, b) => (b.data['lastMessageTime'] ?? '')
-          .toString()
-          .compareTo((a.data['lastMessageTime'] ?? '').toString()));
-
-      return userChats;
-    } on AppwriteException catch (e) {
-      debugPrint('Error en getUserChats fallback: ${e.message}');
-      return [];
     }
+
+    // Deduplicar por pareja de participantes: quedarse con el más reciente / con mensajes
+    final Map<String, Document> bestByPair = {};
+    for (final chat in raw) {
+      final parts = parseParticipants(chat.data['participants']);
+      if (parts.length < 2) continue;
+      // Ignorar chats de prueba
+      if (parts.contains('a') || parts.contains('b')) continue;
+
+      final other = parts.firstWhere((id) => id != userId, orElse: () => '');
+      if (other.isEmpty) continue;
+
+      final key = _pairKey(userId, other);
+      final existing = bestByPair[key];
+      if (existing == null) {
+        bestByPair[key] = chat;
+        continue;
+      }
+
+      final existingScore = _chatScore(existing);
+      final newScore = _chatScore(chat);
+      if (newScore >= existingScore) {
+        bestByPair[key] = chat;
+      }
+    }
+
+    final result = bestByPair.values.toList();
+    result.sort((a, b) => (b.data['lastMessageTime'] ?? '')
+        .toString()
+        .compareTo((a.data['lastMessageTime'] ?? '').toString()));
+    return result;
+  }
+
+  int _chatScore(Document chat) {
+    final last = (chat.data['lastMessage'] ?? '').toString();
+    final time = (chat.data['lastMessageTime'] ?? chat.$updatedAt).toString();
+    var score = time.hashCode.abs() % 100000;
+    if (last.isNotEmpty) score += 1000000;
+    try {
+      score += DateTime.parse(time).millisecondsSinceEpoch ~/ 1000;
+    } catch (_) {}
+    return score;
   }
 
   Future<Document?> findExistingChat({
@@ -162,27 +228,38 @@ class ChatService {
     try {
       final userChats = await getUserChats(participant1Id);
       for (final chat in userChats) {
-        final parts = List<String>.from(chat.data['participants'] ?? []);
+        final parts = parseParticipants(chat.data['participants']);
         if (parts.contains(participant1Id) && parts.contains(participant2Id)) {
           return chat;
         }
       }
-      return null;
+
+      // Buscar también en todos (por si hay duplicados no dedupeados aún)
+      final all = await databases.listDocuments(
+        databaseId: AppwriteConfig.databaseId,
+        collectionId: AppwriteConfig.chatsCollectionId,
+        queries: [Query.limit(100)],
+      );
+      Document? best;
+      for (final chat in all.documents) {
+        final parts = parseParticipants(chat.data['participants']);
+        if (parts.contains(participant1Id) && parts.contains(participant2Id)) {
+          if (best == null || _chatScore(chat) > _chatScore(best)) {
+            best = chat;
+          }
+        }
+      }
+      return best;
     } catch (e) {
       debugPrint('Error en findExistingChat: $e');
       return null;
     }
   }
 
-  Stream<RealtimeMessage> subscribeToMessages(String chatId) {
-    final subscription = realtime.subscribe([
+  RealtimeSubscription subscribeToMessages(String chatId) {
+    return realtime.subscribe([
       'databases.${AppwriteConfig.databaseId}.collections.${AppwriteConfig.messagesCollectionId}.documents',
     ]);
-
-    return subscription.stream.where((event) {
-      final payload = event.payload;
-      return payload['chatId'] == chatId;
-    });
   }
 
   Future<List<Document>> searchUsers(String query) async {
@@ -190,12 +267,14 @@ class ChatService {
       final users = await databases.listDocuments(
         databaseId: AppwriteConfig.databaseId,
         collectionId: AppwriteConfig.usersCollectionId,
-        queries: [
-          Query.search('name', query),
-          Query.limit(20),
-        ],
+        queries: [Query.limit(50)],
       );
-      return users.documents;
+      final q = query.toLowerCase();
+      return users.documents.where((u) {
+        final name = (u.data['name'] ?? '').toString().toLowerCase();
+        final phone = (u.data['phone'] ?? '').toString().toLowerCase();
+        return name.contains(q) || phone.contains(q);
+      }).toList();
     } on AppwriteException catch (e) {
       debugPrint('Error en searchUsers: ${e.message}');
       return [];

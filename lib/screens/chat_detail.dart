@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:appwrite/models.dart';
+import 'package:appwrite/appwrite.dart' show RealtimeSubscription;
 import 'package:conecta_lsb/services/chat_service.dart';
 import 'package:conecta_lsb/screens/video_call_screen.dart';
 
@@ -34,6 +37,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _isLoading = true;
   bool _isSending = false;
   String _chatId = '';
+  RealtimeSubscription? _subscription;
+  Timer? _pollTimer;
 
   static const _accent = Color(0xff37C8F2);
   static const _textDark = Color(0xff1A3A4A);
@@ -68,6 +73,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
+    _subscription?.close();
     _messageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -91,11 +98,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _subscribeToMessages() {
+    _subscription?.close();
+    _pollTimer?.cancel();
     if (_chatId.isEmpty) return;
-    _chatService.subscribeToMessages(_chatId).listen((event) {
-      if (mounted) {
+
+    _subscription = _chatService.subscribeToMessages(_chatId);
+    _subscription!.stream.listen((event) {
+      final payload = event.payload;
+      if (payload['chatId']?.toString() == _chatId && mounted) {
         _loadMessages();
       }
+    });
+
+    // Backup: refrescar cada 3s por si realtime falla
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) _loadMessages();
     });
   }
 

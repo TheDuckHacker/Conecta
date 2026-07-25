@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:appwrite/appwrite.dart';
 import 'package:appwrite/models.dart';
 import 'package:conecta_lsb/screens/chat_detail.dart';
 import 'package:conecta_lsb/screens/user_profile.dart';
@@ -7,7 +6,6 @@ import 'package:conecta_lsb/screens/add_contact_screen.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/chat_service.dart';
 import 'package:conecta_lsb/services/contact_service.dart';
-import 'package:conecta_lsb/services/appwrite_config.dart';
 
 class ChatsTab extends StatefulWidget {
   const ChatsTab({super.key});
@@ -25,9 +23,7 @@ class _ChatsTabState extends State<ChatsTab> {
 
   User? _currentUser;
   List<Document> _chats = [];
-  List<Document> _contactDocs = [];
   List<Document> _contactUsers = [];
-  List<Document> _allAppwriteUsers = [];
   bool _isLoading = true;
 
   static const _accent = Color(0xff37C8F2);
@@ -44,59 +40,10 @@ class _ChatsTabState extends State<ChatsTab> {
     try {
       _currentUser = await _authService.getCurrentUser();
       if (_currentUser != null) {
-        // 1. Cargar chats del usuario
+        _contactService.clearCache();
         _chats = await _chatService.getUserChats(_currentUser!.$id);
-
-        // 2. Cargar lista de todos los usuarios registrados en Appwrite
-        try {
-          final usersResult = await databases.listDocuments(
-            databaseId: AppwriteConfig.databaseId,
-            collectionId: AppwriteConfig.usersCollectionId,
-            queries: [Query.limit(100)],
-          );
-          _allAppwriteUsers = usersResult.documents
-              .where((u) => u.$id != _currentUser!.$id)
-              .toList();
-        } catch (e) {
-          debugPrint('Error listando usuarios: $e');
-        }
-
-        // 3. Cargar documentos de contactos
-        _contactDocs = await _contactService.getContacts(_currentUser!.$id);
-
-        // 4. Mapear a documentos de usuario
-        final List<Document> loadedContacts = [];
-        final Set<String> processedUserIds = {};
-
-        for (final doc in _contactDocs) {
-          final contactUserId = doc.data['contactUserId']?.toString();
-          if (contactUserId != null && !processedUserIds.contains(contactUserId)) {
-            processedUserIds.add(contactUserId);
-
-            Document? userDoc = _allAppwriteUsers.firstWhere(
-              (u) => u.$id == contactUserId,
-              orElse: () => Document(
-                $id: '',
-                $collectionId: '',
-                $databaseId: '',
-                $createdAt: '',
-                $updatedAt: '',
-                $permissions: [],
-                data: {},
-              ),
-            );
-
-            if (userDoc.$id.isEmpty) {
-              userDoc = await _contactService.getUserById(contactUserId);
-            }
-
-            if (userDoc != null && userDoc.$id.isNotEmpty) {
-              loadedContacts.add(userDoc);
-            }
-          }
-        }
-
-        _contactUsers = loadedContacts;
+        // Solo contactos que el usuario agregó explícitamente
+        _contactUsers = await _contactService.getContacts(_currentUser!.$id);
       }
     } catch (e) {
       debugPrint('Error cargando datos de chats/contactos: $e');
@@ -139,6 +86,7 @@ class _ChatsTabState extends State<ChatsTab> {
               avatar: user.data['avatar'] ?? '',
               isActive: false,
               currentUserId: _currentUser!.$id,
+              otherUserId: user.$id,
             ),
           ),
         ).then((_) => _loadData());
@@ -155,28 +103,14 @@ class _ChatsTabState extends State<ChatsTab> {
   }
 
   Future<void> _confirmRemoveContact(Document user) async {
-    final contactDoc = _contactDocs.firstWhere(
-      (doc) => doc.data['contactUserId'] == user.$id,
-      orElse: () => Document(
-        $id: '',
-        $collectionId: '',
-        $databaseId: '',
-        $createdAt: '',
-        $updatedAt: '',
-        $permissions: [],
-        data: {},
-      ),
-    );
-
-    if (contactDoc.$id.isEmpty) return;
-
     final name = user.data['name'] ?? 'este contacto';
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Eliminar contacto'),
-        content: Text('¿Deseas eliminar a $name de tus contactos?'),
+        content: Text(
+            '¿Quitar a $name de tus contactos? El chat se mantiene.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -197,8 +131,8 @@ class _ChatsTabState extends State<ChatsTab> {
 
     if (confirm == true) {
       try {
-        await _contactService.removeContact(contactDoc.$id);
-        _loadData();
+        await _contactService.removeContact(user.$id);
+        await _loadData();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -226,15 +160,8 @@ class _ChatsTabState extends State<ChatsTab> {
           .contains(_searchQuery.toLowerCase());
     }).toList();
 
-    // Mostrar contactos agregados o la lista de usuarios si busca o está vacía
-    final displayList = (_contactUsers.isNotEmpty && _searchQuery.isEmpty)
-        ? _contactUsers
-        : [
-            ..._contactUsers,
-            ..._allAppwriteUsers.where((u) => !_contactUsers.any((c) => c.$id == u.$id)),
-          ];
-
-    final filteredContacts = displayList.where((user) {
+    // Solo contactos que el usuario agregó
+    final filteredContacts = _contactUsers.where((user) {
       final name = (user.data['name'] ?? '').toString().toLowerCase();
       final phone = (user.data['phone'] ?? '').toString().toLowerCase();
       final q = _searchQuery.toLowerCase();
@@ -517,11 +444,8 @@ class _ChatsTabState extends State<ChatsTab> {
       separatorBuilder: (context, index) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final chat = chats[index];
-        final participants =
-            List<String>.from(chat.data['participants'] ?? []);
-        final otherUserId = participants.firstWhere(
-            (id) => id != _currentUser?.$id,
-            orElse: () => '');
+        final otherUserId =
+            ChatService.otherParticipantId(chat, _currentUser!.$id);
 
         return FutureBuilder<Document?>(
           future: _getUserInfo(otherUserId),
@@ -529,12 +453,18 @@ class _ChatsTabState extends State<ChatsTab> {
             final otherUser = snapshot.data;
             final rawName = (otherUser?.data['name'] ?? '').toString();
             final rawPhone = (otherUser?.data['phone'] ?? '').toString();
-            final name = (rawName.isNotEmpty && rawName != 'Usuario')
+            // Nunca mostrar el nombre del usuario actual como "otro"
+            var name = (rawName.isNotEmpty && rawName != 'Usuario')
                 ? rawName
                 : (rawPhone.isNotEmpty ? rawPhone : 'Contacto');
+            if (otherUserId.isEmpty || otherUserId == _currentUser!.$id) {
+              name = 'Contacto';
+            }
             final avatar = otherUser?.data['avatar'] ?? '';
             final lastMessage = chat.data['lastMessage'] ?? '';
-            final updatedAt = chat.data['updatedAt']?.toString() ?? chat.data['lastMessageTime']?.toString() ?? '';
+            final updatedAt = chat.data['updatedAt']?.toString() ??
+                chat.data['lastMessageTime']?.toString() ??
+                '';
 
             return GestureDetector(
               onTap: () {
@@ -547,6 +477,7 @@ class _ChatsTabState extends State<ChatsTab> {
                       avatar: avatar,
                       isActive: false,
                       currentUserId: _currentUser!.$id,
+                      otherUserId: otherUserId.isNotEmpty ? otherUserId : null,
                     ),
                   ),
                 ).then((_) => _loadData());
@@ -692,12 +623,10 @@ class _ChatsTabState extends State<ChatsTab> {
         final avatar = user.data['avatar'] ?? '';
         final status = user.data['status'] ?? 'offline';
         final isOnline = status == 'online';
-        final isSavedContact =
-            _contactDocs.any((d) => d.data['contactUserId'] == user.$id);
 
         return GestureDetector(
           onTap: () => _startChat(user),
-          onLongPress: isSavedContact ? () => _confirmRemoveContact(user) : null,
+          onLongPress: () => _confirmRemoveContact(user),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
@@ -794,31 +723,27 @@ class _ChatsTabState extends State<ChatsTab> {
                     onPressed: () => _startChat(user),
                   ),
                 ),
-                if (isSavedContact) ...[
-                  const SizedBox(width: 4),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded,
-                        color: Colors.redAccent, size: 20),
-                    onPressed: () => _confirmRemoveContact(user),
-                  ),
-                ] else ...[
-                  const SizedBox(width: 4),
-                  IconButton(
-                    icon: Icon(Icons.info_outline_rounded,
-                        color: _textMuted.withValues(alpha: 0.8), size: 20),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => UserProfileScreen(
-                            userId: user.$id,
-                            currentUserId: _currentUser!.$id,
-                          ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded,
+                      color: Colors.redAccent, size: 20),
+                  onPressed: () => _confirmRemoveContact(user),
+                ),
+                IconButton(
+                  icon: Icon(Icons.info_outline_rounded,
+                      color: _textMuted.withValues(alpha: 0.8), size: 20),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => UserProfileScreen(
+                          userId: user.$id,
+                          currentUserId: _currentUser!.$id,
                         ),
-                      ).then((_) => _loadData());
-                    },
-                  ),
-                ],
+                      ),
+                    ).then((_) => _loadData());
+                  },
+                ),
               ],
             ),
           ),
@@ -828,8 +753,6 @@ class _ChatsTabState extends State<ChatsTab> {
   }
 
   Future<Document?> _getUserInfo(String userId) async {
-    final match = _allAppwriteUsers.where((u) => u.$id == userId);
-    if (match.isNotEmpty) return match.first;
     return await _contactService.getUserById(userId);
   }
 }

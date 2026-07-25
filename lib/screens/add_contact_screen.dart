@@ -205,6 +205,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
               avatar: _foundUser!.data['avatar'] ?? '',
               isActive: false,
               currentUserId: currentUser.$id,
+              otherUserId: _foundUser!.$id,
             ),
           ),
         );
