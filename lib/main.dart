@@ -5,6 +5,12 @@ import 'package:conecta_lsb/services/auth_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Evita que errores de red/realtime tumben la app
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('FlutterError: ${details.exceptionAsString()}');
+  };
+
   runApp(const ConectaApp());
 }
 
@@ -34,6 +40,8 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   final _authService = AuthService();
+  late final Future _authFuture = _authService.getCurrentUser();
+  bool _markedOnline = false;
 
   @override
   void initState() {
@@ -49,20 +57,28 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
-    final user = await _authService.getCurrentUser();
-    if (user == null) return;
+    try {
+      final user = await _authService.getCurrentUser();
+      if (user == null) return;
 
-    if (state == AppLifecycleState.resumed) {
-      await _authService.setOnlineStatus(user.$id, true);
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      await _authService.setOnlineStatus(user.$id, false);
+      // Solo paused/resumed: "inactive" se dispara al abrir teclado y NO debe marcar offline
+      if (state == AppLifecycleState.resumed) {
+        await _authService.setOnlineStatus(user.$id, true);
+        _markedOnline = true;
+      } else if (state == AppLifecycleState.paused ||
+          state == AppLifecycleState.detached) {
+        await _authService.setOnlineStatus(user.$id, false);
+        _markedOnline = false;
+      }
+    } catch (e) {
+      debugPrint('Lifecycle status error: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder(
-      future: _authService.getCurrentUser(),
+      future: _authFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -71,7 +87,13 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
         }
 
         if (snapshot.hasData && snapshot.data != null) {
-          _authService.setOnlineStatus(snapshot.data!.$id, true);
+          if (!_markedOnline) {
+            _markedOnline = true;
+            // Fuera del build síncrono
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _authService.setOnlineStatus(snapshot.data!.$id, true);
+            });
+          }
           return const ChatScreen();
         }
 

@@ -443,7 +443,7 @@ class _HomeTabState extends State<HomeTab> {
             }
             final avatar = otherUser?.data['avatar'] ?? '';
             final lastMessage = chat.data['lastMessage'] ?? '';
-            final updatedAt = chat.data['updatedAt']?.toString() ?? chat.data['lastMessageTime']?.toString() ?? '';
+            final updatedAt = chat.$updatedAt;
 
             return GestureDetector(
               onTap: () {
@@ -579,7 +579,7 @@ class _HomeTabState extends State<HomeTab> {
 
   String _formatTime(String timestamp) {
     try {
-      final dt = DateTime.parse(timestamp);
+      final dt = DateTime.parse(timestamp).toLocal();
       return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     } catch (_) {
       return '';

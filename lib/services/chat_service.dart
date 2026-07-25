@@ -29,6 +29,16 @@ class ChatService {
     return '';
   }
 
+  /// Hora real del mensaje. Se prioriza `$createdAt` porque lo genera el
+  /// servidor: el reloj de cada dispositivo puede estar desfasado y romper
+  /// tanto el orden como las horas mostradas.
+  static DateTime messageTime(Document message) {
+    final server = DateTime.tryParse(message.$createdAt);
+    if (server != null) return server.toLocal();
+    final local = DateTime.tryParse((message.data['timestamp'] ?? '').toString());
+    return local?.toLocal() ?? DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
   static String _pairKey(String a, String b) {
     final sorted = [a, b]..sort();
     return '${sorted[0]}_${sorted[1]}';
@@ -60,8 +70,8 @@ class ChatService {
         data: {
           'participants': [participant1Id, participant2Id],
           'lastMessage': '',
-          'lastMessageTime': DateTime.now().toIso8601String(),
-          'createdAt': DateTime.now().toIso8601String(),
+          'lastMessageTime': DateTime.now().toUtc().toIso8601String(),
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
         },
         permissions: [
           Permission.read(Role.any()),
@@ -80,7 +90,7 @@ class ChatService {
     required String senderId,
     required String text,
   }) async {
-    final now = DateTime.now().toIso8601String();
+    final now = DateTime.now().toUtc().toIso8601String();
     try {
       await databases.createDocument(
         databaseId: AppwriteConfig.databaseId,
@@ -114,17 +124,18 @@ class ChatService {
   }
 
   Future<List<Document>> getMessages(String chatId) async {
+    List<Document> result = [];
     try {
       final messages = await databases.listDocuments(
         databaseId: AppwriteConfig.databaseId,
         collectionId: AppwriteConfig.messagesCollectionId,
         queries: [
           Query.equal('chatId', chatId),
-          Query.orderAsc('timestamp'),
+          Query.orderAsc('\$createdAt'),
           Query.limit(200),
         ],
       );
-      return messages.documents;
+      result = messages.documents;
     } on AppwriteException catch (e) {
       debugPrint('Error getMessages: ${e.message}');
       try {
@@ -133,17 +144,16 @@ class ChatService {
           collectionId: AppwriteConfig.messagesCollectionId,
           queries: [Query.limit(200)],
         );
-        final filtered = all.documents
+        result = all.documents
             .where((m) => m.data['chatId']?.toString() == chatId)
             .toList();
-        filtered.sort((a, b) => (a.data['timestamp'] ?? '')
-            .toString()
-            .compareTo((b.data['timestamp'] ?? '').toString()));
-        return filtered;
       } catch (_) {
         return [];
       }
     }
+
+    result.sort((a, b) => messageTime(a).compareTo(messageTime(b)));
+    return result;
   }
 
   /// Chats del usuario, **sin duplicados** (1 chat por pareja).
@@ -204,20 +214,19 @@ class ChatService {
     }
 
     final result = bestByPair.values.toList();
-    result.sort((a, b) => (b.data['lastMessageTime'] ?? '')
-        .toString()
-        .compareTo((a.data['lastMessageTime'] ?? '').toString()));
+    result.sort((a, b) => _chatActivity(b).compareTo(_chatActivity(a)));
     return result;
+  }
+
+  static DateTime _chatActivity(Document chat) {
+    return DateTime.tryParse(chat.$updatedAt)?.toLocal() ??
+        DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   int _chatScore(Document chat) {
     final last = (chat.data['lastMessage'] ?? '').toString();
-    final time = (chat.data['lastMessageTime'] ?? chat.$updatedAt).toString();
-    var score = time.hashCode.abs() % 100000;
-    if (last.isNotEmpty) score += 1000000;
-    try {
-      score += DateTime.parse(time).millisecondsSinceEpoch ~/ 1000;
-    } catch (_) {}
+    var score = _chatActivity(chat).millisecondsSinceEpoch ~/ 1000;
+    if (last.isNotEmpty) score += 1000000000;
     return score;
   }
 
