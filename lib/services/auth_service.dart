@@ -13,221 +13,65 @@ class AuthService {
     return '+$digits';
   }
 
-  /// Email interno generado desde los dígitos del teléfono.
-  /// Appwrite lo exige; el usuario nunca lo ve.
-  String _emailFromPhone(String phone) => '${_digits(phone)}@conecta.app';
-
-  /// Genera una contraseña determinista de al menos 16 caracteres
-  /// usando solo caracteres alfanuméricos (sin $, +, etc.).
-  String _passwordFromPhone(String phone) {
-    final digits = _digits(phone);
-
-    // Hash simple pero estable
-    int h1 = 0x811c9dc5; // FNV offset basis
-    for (int i = 0; i < digits.length; i++) {
-      h1 = (h1 ^ digits.codeUnitAt(i)) & 0xFFFFFFFF;
-      h1 = (h1 * 0x01000193) & 0xFFFFFFFF;
-    }
-
-    // Segundo hash con seed diferente para más entropía
-    int h2 = 0;
-    for (int i = 0; i < digits.length; i++) {
-      h2 = ((h2 << 5) - h2 + digits.codeUnitAt(i)) & 0xFFFFFFFF;
-    }
-
-    final hex1 = h1.abs().toRadixString(16).padLeft(8, '0');
-    final hex2 = h2.abs().toRadixString(16).padLeft(8, '0');
-
-    // Resultado: "Cx" + 16 hex chars = 18 chars, siempre seguro para Appwrite
-    return 'Cx$hex1$hex2';
-  }
-
-  /// Contraseña legacy para compatibilidad con cuentas antiguas.
-  String _legacyPassword(String phone) {
-    final digits = _digits(phone);
-    int hash = 0;
-    for (int i = 0; i < digits.length; i++) {
-      hash = ((hash << 5) - hash + digits.codeUnitAt(i)) & 0xFFFFFFFF;
-    }
-    final hex = hash.abs().toRadixString(16);
-    return 'c\$${hex.padLeft(12, '0')}';
-  }
-
-  String _friendlyError(AppwriteException e, {required bool isRegister}) {
-    final raw = (e.message ?? '').toLowerCase();
-    final type = (e.type ?? '').toLowerCase();
-    final code = e.code;
-
-    debugPrint('Appwrite auth error [$code] type=$type msg=${e.message}');
-
-    if (code == 409 ||
-        raw.contains('already exists') ||
-        type.contains('user_already_exists')) {
-      return 'Este número ya está registrado. Inicia sesión.';
-    }
-    if (code == 401 ||
-        type.contains('user_invalid_credentials') ||
-        raw.contains('invalid credentials')) {
-      return isRegister
-          ? 'No se pudo crear la cuenta. Revisa tu número.'
-          : 'Número no registrado o incorrecto. ¿Ya creaste tu cuenta?';
-    }
-    if (raw.contains('rate limit') || code == 429) {
-      return 'Demasiados intentos. Espera un momento e intenta de nuevo.';
-    }
-    if (raw.contains('network') ||
-        raw.contains('socket') ||
-        raw.contains('failed host lookup')) {
-      return 'Sin conexión. Revisa tu internet e intenta de nuevo.';
-    }
-    if (raw.contains('session') && raw.contains('prohibited')) {
-      return 'Ya hay una sesión activa. Cierra la app e intenta de nuevo.';
-    }
-    if (raw.contains('password')) {
-      return 'Error de autenticación. Intenta registrarte de nuevo.';
-    }
-
-    return isRegister
-        ? 'No se pudo crear la cuenta. Intenta de nuevo.'
-        : 'No se pudo iniciar sesión. Verifica tu número.';
-  }
-
   Future<void> _clearExistingSession() async {
     try {
       await account.deleteSession(sessionId: 'current');
     } catch (_) {}
   }
 
-  /// Intenta iniciar sesión con la contraseña nueva, si falla prueba la legacy.
-  Future<Session> _tryLogin(String email, String phone) async {
-    final passwords = [
-      _passwordFromPhone(phone),
-      _legacyPassword(phone),
-    ];
-
-    AppwriteException? lastError;
-
-    for (final password in passwords) {
-      try {
-        debugPrint('Intentando login con email=$email password=${password.substring(0, 4)}...');
-        return await account.createEmailPasswordSession(
-          email: email,
-          password: password,
-        );
-      } on AppwriteException catch (e) {
-        lastError = e;
-        debugPrint('Login fallido con variante: ${e.message}');
-        continue;
-      }
-    }
-
-    throw lastError ?? AppwriteException('Invalid credentials');
-  }
-
-  /// Crea cuenta + inicia sesión + guarda perfil.
-  Future<User> register({
-    required String name,
-    required String phone,
-  }) async {
-    final digits = _digits(phone);
-    final email = _emailFromPhone(digits);
-    final password = _passwordFromPhone(digits);
-
-    debugPrint('=== REGISTRO ===');
-    debugPrint('Phone input: $phone');
-    debugPrint('Digits: $digits');
-    debugPrint('Email: $email');
-    debugPrint('Password: ${password.substring(0, 4)}... (${password.length} chars)');
+  /// Paso 1: Enviar código OTP al número de teléfono.
+  /// Retorna el userId que se necesita para verificar el código.
+  Future<String> sendOTP({required String phone}) async {
+    final normalized = normalizePhone(phone);
+    debugPrint('=== ENVIAR OTP ===');
+    debugPrint('Phone: $normalized');
 
     await _clearExistingSession();
 
-    late User user;
-
     try {
-      user = await account.create(
+      final token = await account.createPhoneToken(
         userId: ID.unique(),
-        name: name,
-        email: email,
-        password: password,
+        phone: normalized,
       );
-      debugPrint('Cuenta creada: ${user.$id}');
+      debugPrint('OTP enviado. UserId: ${token.userId}');
+      return token.userId;
     } on AppwriteException catch (e) {
-      if (e.code == 409 ||
-          (e.message ?? '').toLowerCase().contains('already exists')) {
-        // Ya existe → intentar login
-        debugPrint('Cuenta ya existe, intentando login...');
-        await _clearExistingSession();
-        try {
-          await _tryLogin(email, digits);
-        } catch (_) {
-          throw Exception('Este número ya está registrado. Usa Iniciar Sesión.');
-        }
-
-        final current = await getCurrentUser();
-        if (current == null) {
-          throw Exception('Este número ya está registrado. Inicia sesión.');
-        }
-        await ensureUserProfile(
-          userId: current.$id,
-          name: name,
-          phone: normalizePhone(phone),
-        );
-        return current;
-      }
-      throw Exception(_friendlyError(e, isRegister: true));
+      debugPrint('Error enviando OTP: [${e.code}] ${e.message}');
+      throw Exception(_friendlyError(e));
     }
-
-    // Crear sesión después de registrar
-    try {
-      await account.createEmailPasswordSession(email: email, password: password);
-      debugPrint('Sesión creada exitosamente');
-    } on AppwriteException catch (e) {
-      debugPrint('Error creando sesión post-registro: ${e.message}');
-      throw Exception(
-        'Cuenta creada, pero no se pudo iniciar sesión. Prueba Iniciar Sesión con el mismo número.',
-      );
-    }
-
-    await ensureUserProfile(
-      userId: user.$id,
-      name: name,
-      phone: normalizePhone(phone),
-    );
-
-    return user;
   }
 
-  /// Inicia sesión con un número de teléfono.
-  Future<Session> login({required String phone}) async {
-    final digits = _digits(phone);
-    final email = _emailFromPhone(digits);
-
-    debugPrint('=== LOGIN ===');
-    debugPrint('Phone input: $phone');
-    debugPrint('Digits: $digits');
-    debugPrint('Email: $email');
-
-    await _clearExistingSession();
+  /// Paso 2: Verificar el código OTP e iniciar sesión.
+  Future<Session> verifyOTP({
+    required String userId,
+    required String otp,
+  }) async {
+    debugPrint('=== VERIFICAR OTP ===');
+    debugPrint('UserId: $userId, OTP: $otp');
 
     try {
-      final session = await _tryLogin(email, digits);
-
-      // Asegurar perfil si faltaba
-      final user = await account.get();
-      await ensureUserProfile(
-        userId: user.$id,
-        name: user.name.isNotEmpty ? user.name : 'Usuario',
-        phone: normalizePhone(phone),
+      final session = await account.createSession(
+        userId: userId,
+        secret: otp,
       );
-
-      debugPrint('Login exitoso: ${user.$id}');
+      debugPrint('Sesión creada exitosamente');
       return session;
     } on AppwriteException catch (e) {
-      throw Exception(_friendlyError(e, isRegister: false));
+      debugPrint('Error verificando OTP: [${e.code}] ${e.message}');
+      throw Exception(_friendlyError(e));
     }
   }
 
-  /// Crea el perfil en la DB si no existe; si ya existe, no falla.
+  /// Guarda/actualiza el nombre del usuario después del login.
+  Future<void> updateUserName(String name) async {
+    try {
+      await account.updateName(name: name);
+    } catch (e) {
+      debugPrint('Error actualizando nombre: $e');
+    }
+  }
+
+  /// Crea el perfil en la DB si no existe.
   Future<void> ensureUserProfile({
     required String userId,
     required String name,
@@ -247,17 +91,16 @@ class AuthService {
 
     final data = {
       'name': name,
-      'phone': phone,
+      'phone': normalizePhone(phone),
       'avatar': '',
       'status': 'online',
       'createdAt': DateTime.now().toIso8601String(),
     };
 
-    // Guardar también en prefs del account (fallback)
     try {
       await account.updatePrefs(prefs: {
         'name': name,
-        'phone': phone,
+        'phone': normalizePhone(phone),
       });
       await account.updateName(name: name);
     } catch (e) {
@@ -278,7 +121,6 @@ class AuthService {
       );
     } on AppwriteException catch (e) {
       if (e.code == 409) return;
-      // Reintento sin permissions explícitos
       try {
         await databases.createDocument(
           databaseId: AppwriteConfig.databaseId,
@@ -291,6 +133,35 @@ class AuthService {
         debugPrint('ensureUserProfile error: ${e2.message}');
       }
     }
+  }
+
+  String _friendlyError(AppwriteException e) {
+    final raw = (e.message ?? '').toLowerCase();
+    final code = e.code;
+
+    debugPrint('Appwrite error [$code] msg=${e.message}');
+
+    if (raw.contains('rate limit') || code == 429) {
+      return 'Demasiados intentos. Espera un momento e intenta de nuevo.';
+    }
+    if (raw.contains('network') ||
+        raw.contains('socket') ||
+        raw.contains('failed host lookup')) {
+      return 'Sin conexión. Revisa tu internet e intenta de nuevo.';
+    }
+    if (raw.contains('invalid token') ||
+        raw.contains('invalid credentials') ||
+        code == 401) {
+      return 'Código incorrecto. Revisa e intenta de nuevo.';
+    }
+    if (raw.contains('expired')) {
+      return 'El código expiró. Solicita uno nuevo.';
+    }
+    if (raw.contains('phone') && raw.contains('invalid')) {
+      return 'Número de teléfono inválido. Verifica el formato.';
+    }
+
+    return 'Error: ${e.message ?? 'Intenta de nuevo.'}';
   }
 
   Future<User?> getCurrentUser() async {
