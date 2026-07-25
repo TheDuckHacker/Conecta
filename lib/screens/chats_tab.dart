@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:appwrite/appwrite.dart';
 import 'package:appwrite/models.dart';
 import 'package:conecta_lsb/screens/chat_detail.dart';
 import 'package:conecta_lsb/screens/user_profile.dart';
@@ -43,44 +44,55 @@ class _ChatsTabState extends State<ChatsTab> {
     try {
       _currentUser = await _authService.getCurrentUser();
       if (_currentUser != null) {
-        // Cargar chats
+        // 1. Cargar chats del usuario
         _chats = await _chatService.getUserChats(_currentUser!.$id);
 
-        // Cargar todos los usuarios para fallback/búsqueda general
-        final usersResult = await databases.listDocuments(
-          databaseId: AppwriteConfig.databaseId,
-          collectionId: AppwriteConfig.usersCollectionId,
-        );
-        _allAppwriteUsers = usersResult.documents
-            .where((u) => u.$id != _currentUser!.$id)
-            .toList();
+        // 2. Cargar lista de todos los usuarios registrados en Appwrite
+        try {
+          final usersResult = await databases.listDocuments(
+            databaseId: AppwriteConfig.databaseId,
+            collectionId: AppwriteConfig.usersCollectionId,
+            queries: [Query.limit(100)],
+          );
+          _allAppwriteUsers = usersResult.documents
+              .where((u) => u.$id != _currentUser!.$id)
+              .toList();
+        } catch (e) {
+          debugPrint('Error listando usuarios: $e');
+        }
 
-        // Cargar contactos del usuario desde la colección de contactos
+        // 3. Cargar documentos de contactos
         _contactDocs = await _contactService.getContacts(_currentUser!.$id);
 
-        // Mapear documentos de contactos a documentos de usuario
+        // 4. Mapear a documentos de usuario
         final List<Document> loadedContacts = [];
+        final Set<String> processedUserIds = {};
+
         for (final doc in _contactDocs) {
           final contactUserId = doc.data['contactUserId']?.toString();
-          if (contactUserId != null) {
-            final userDoc = _allAppwriteUsers.firstWhere(
+          if (contactUserId != null && !processedUserIds.contains(contactUserId)) {
+            processedUserIds.add(contactUserId);
+
+            Document? userDoc = _allAppwriteUsers.firstWhere(
               (u) => u.$id == contactUserId,
               orElse: () => Document(
-                $id: contactUserId,
-                $collectionId: AppwriteConfig.usersCollectionId,
-                $databaseId: AppwriteConfig.databaseId,
+                $id: '',
+                $collectionId: '',
+                $databaseId: '',
                 $createdAt: '',
                 $updatedAt: '',
                 $permissions: [],
-                data: {
-                  'name': doc.data['phone'] ?? 'Contacto',
-                  'phone': doc.data['phone'] ?? '',
-                  'avatar': '',
-                  'status': 'offline',
-                },
+                data: {},
               ),
             );
-            loadedContacts.add(userDoc);
+
+            if (userDoc.$id.isEmpty) {
+              userDoc = await _contactService.getUserById(contactUserId);
+            }
+
+            if (userDoc != null && userDoc.$id.isNotEmpty) {
+              loadedContacts.add(userDoc);
+            }
           }
         }
 
@@ -98,6 +110,7 @@ class _ChatsTabState extends State<ChatsTab> {
       MaterialPageRoute(builder: (_) => const AddContactScreen()),
     );
     if (result == true) {
+      setState(() => _isLoading = true);
       _loadData();
     }
   }
@@ -213,7 +226,7 @@ class _ChatsTabState extends State<ChatsTab> {
           .contains(_searchQuery.toLowerCase());
     }).toList();
 
-    // Mostrar únicamente la lista de contactos agregados por el usuario
+    // Mostrar contactos agregados o todos si busca
     final displayList = _contactUsers;
 
     final filteredContacts = displayList.where((user) {
@@ -803,14 +816,6 @@ class _ChatsTabState extends State<ChatsTab> {
   }
 
   Future<Document?> _getUserInfo(String userId) async {
-    try {
-      return await databases.getDocument(
-        databaseId: AppwriteConfig.databaseId,
-        collectionId: AppwriteConfig.usersCollectionId,
-        documentId: userId,
-      );
-    } catch (e) {
-      return null;
-    }
+    return await _contactService.getUserById(userId);
   }
 }

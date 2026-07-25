@@ -1,5 +1,6 @@
 import 'package:appwrite/appwrite.dart';
 import 'package:appwrite/models.dart';
+import 'package:flutter/foundation.dart';
 import 'appwrite_config.dart';
 
 class ChatService {
@@ -80,23 +81,77 @@ class ChatService {
       );
       return messages.documents;
     } on AppwriteException catch (e) {
-      throw Exception(e.message ?? 'Error al obtener mensajes');
+      debugPrint('Error getMessages: ${e.message}');
+      // Fallback sin queries
+      try {
+        final all = await databases.listDocuments(
+          databaseId: AppwriteConfig.databaseId,
+          collectionId: AppwriteConfig.messagesCollectionId,
+          queries: [Query.limit(100)],
+        );
+        final filtered = all.documents
+            .where((m) => m.data['chatId'] == chatId)
+            .toList();
+        filtered.sort((a, b) => (a.data['timestamp'] ?? '')
+            .toString()
+            .compareTo((b.data['timestamp'] ?? '').toString()));
+        return filtered;
+      } catch (_) {
+        return [];
+      }
     }
   }
 
   Future<List<Document>> getUserChats(String userId) async {
+    // 1. Intentar consulta directa por participantes
+    try {
+      final chats = await databases.listDocuments(
+        databaseId: AppwriteConfig.databaseId,
+        collectionId: AppwriteConfig.chatsCollectionId,
+        queries: [
+          Query.equal('participants', userId),
+          Query.limit(100),
+        ],
+      );
+      if (chats.documents.isNotEmpty) {
+        return chats.documents;
+      }
+    } catch (_) {}
+
     try {
       final chats = await databases.listDocuments(
         databaseId: AppwriteConfig.databaseId,
         collectionId: AppwriteConfig.chatsCollectionId,
         queries: [
           Query.search('participants', userId),
-          Query.orderDesc('lastMessageTime'),
+          Query.limit(100),
         ],
       );
-      return chats.documents;
+      if (chats.documents.isNotEmpty) {
+        return chats.documents;
+      }
+    } catch (_) {}
+
+    // 2. Fallback resiliente: Obtener lista de chats y filtrar en Dart
+    try {
+      final allChats = await databases.listDocuments(
+        databaseId: AppwriteConfig.databaseId,
+        collectionId: AppwriteConfig.chatsCollectionId,
+        queries: [Query.limit(100)],
+      );
+      final userChats = allChats.documents.where((doc) {
+        final parts = List<String>.from(doc.data['participants'] ?? []);
+        return parts.contains(userId);
+      }).toList();
+
+      userChats.sort((a, b) => (b.data['lastMessageTime'] ?? '')
+          .toString()
+          .compareTo((a.data['lastMessageTime'] ?? '').toString()));
+
+      return userChats;
     } on AppwriteException catch (e) {
-      throw Exception(e.message ?? 'Error al obtener chats');
+      debugPrint('Error en getUserChats fallback: ${e.message}');
+      return [];
     }
   }
 
@@ -105,16 +160,16 @@ class ChatService {
     required String participant2Id,
   }) async {
     try {
-      final chats = await databases.listDocuments(
-        databaseId: AppwriteConfig.databaseId,
-        collectionId: AppwriteConfig.chatsCollectionId,
-        queries: [
-          Query.search('participants', participant1Id),
-          Query.search('participants', participant2Id),
-        ],
-      );
-      return chats.documents.isNotEmpty ? chats.documents.first : null;
-    } on AppwriteException {
+      final userChats = await getUserChats(participant1Id);
+      for (final chat in userChats) {
+        final parts = List<String>.from(chat.data['participants'] ?? []);
+        if (parts.contains(participant1Id) && parts.contains(participant2Id)) {
+          return chat;
+        }
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error en findExistingChat: $e');
       return null;
     }
   }
@@ -142,7 +197,8 @@ class ChatService {
       );
       return users.documents;
     } on AppwriteException catch (e) {
-      throw Exception(e.message ?? 'Error al buscar usuarios');
+      debugPrint('Error en searchUsers: ${e.message}');
+      return [];
     }
   }
 }
