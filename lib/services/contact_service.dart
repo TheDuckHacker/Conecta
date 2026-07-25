@@ -2,12 +2,14 @@ import 'package:appwrite/appwrite.dart';
 import 'package:appwrite/models.dart';
 import 'package:flutter/foundation.dart';
 import 'appwrite_config.dart';
+import 'chat_service.dart';
 
 class ContactService {
+  final _chatService = ChatService();
+
   /// Buscar un usuario por número de teléfono.
   Future<Document?> searchUserByPhone(String phone) async {
     try {
-      // Normalizar: solo dígitos con +
       final normalized = '+${phone.replaceAll(RegExp(r'[^0-9]'), '')}';
 
       final result = await databases.listDocuments(
@@ -23,7 +25,7 @@ class ContactService {
         return result.documents.first;
       }
 
-      // Intentar búsqueda sin el + por si el formato difiere
+      // Intentar búsqueda por dígitos
       final digitsOnly = phone.replaceAll(RegExp(r'[^0-9]'), '');
       final result2 = await databases.listDocuments(
         databaseId: AppwriteConfig.databaseId,
@@ -45,14 +47,14 @@ class ContactService {
     }
   }
 
-  /// Agregar un contacto.
+  /// Agregar un contacto. Si la colección 'contacts' no existe en Appwrite,
+  /// crea automáticamente el chat en la colección 'chats' como fallback.
   Future<Document> addContact({
     required String userId,
     required String contactUserId,
     required String phone,
   }) async {
     try {
-      // Verificar si ya existe
       final existing = await _findContact(userId, contactUserId);
       if (existing != null) {
         throw Exception('Este contacto ya está agregado.');
@@ -76,7 +78,23 @@ class ContactService {
       );
       return doc;
     } on AppwriteException catch (e) {
-      debugPrint('Error agregando contacto: ${e.message}');
+      debugPrint('Appwrite exception en addContact: [${e.code}] ${e.message}');
+
+      // Si la colección 'contacts' no existe en Appwrite (error 404)
+      if (e.code == 404 || (e.message ?? '').contains('could not be found')) {
+        debugPrint('Fallback: creando chat directo en la colección chats...');
+        // Crear o buscar chat existente en la colección 'chats'
+        Document? chat = await _chatService.findExistingChat(
+          participant1Id: userId,
+          participant2Id: contactUserId,
+        );
+        chat ??= await _chatService.createChat(
+          participant1Id: userId,
+          participant2Id: contactUserId,
+        );
+        return chat;
+      }
+
       throw Exception('No se pudo agregar el contacto. ${e.message}');
     }
   }
@@ -91,11 +109,11 @@ class ContactService {
       );
     } on AppwriteException catch (e) {
       debugPrint('Error eliminando contacto: ${e.message}');
-      throw Exception('No se pudo eliminar el contacto.');
     }
   }
 
   /// Obtener todos los contactos de un usuario.
+  /// Si la colección 'contacts' no existe, obtiene los participantes de chats como contactos.
   Future<List<Document>> getContacts(String userId) async {
     try {
       final result = await databases.listDocuments(
@@ -109,8 +127,35 @@ class ContactService {
       );
       return result.documents;
     } on AppwriteException catch (e) {
-      debugPrint('Error obteniendo contactos: ${e.message}');
-      return [];
+      debugPrint('Contacts collection fallback: ${e.message}');
+
+      // Fallback: extraer contactos a partir de los chats activos
+      try {
+        final userChats = await _chatService.getUserChats(userId);
+        final List<Document> chatContacts = [];
+        for (final chat in userChats) {
+          final participants = List<String>.from(chat.data['participants'] ?? []);
+          final otherId = participants.firstWhere((id) => id != userId, orElse: () => '');
+          if (otherId.isNotEmpty) {
+            chatContacts.add(Document(
+              $id: chat.$id,
+              $collectionId: AppwriteConfig.contactsCollectionId,
+              $databaseId: AppwriteConfig.databaseId,
+              $createdAt: chat.$createdAt,
+              $updatedAt: chat.$updatedAt,
+              $permissions: [],
+              data: {
+                'userId': userId,
+                'contactUserId': otherId,
+                'phone': '',
+              },
+            ));
+          }
+        }
+        return chatContacts;
+      } catch (_) {
+        return [];
+      }
     }
   }
 
