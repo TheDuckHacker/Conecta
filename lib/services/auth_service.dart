@@ -4,46 +4,53 @@ import 'package:flutter/foundation.dart';
 import 'appwrite_config.dart';
 
 class AuthService {
-  /// Normaliza el teléfono a formato E.164: +5917xxxxxxx
+  /// Extrae solo dígitos del teléfono.
+  String _digits(String phone) => phone.replaceAll(RegExp(r'[^0-9]'), '');
+
+  /// Normaliza el teléfono a formato E.164: +<dígitos>
   String normalizePhone(String phone) {
-    final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    final digits = _digits(phone);
     return '+$digits';
   }
 
-  String _digits(String phone) => phone.replaceAll(RegExp(r'[^0-9]'), '');
-
-  /// Email interno (Appwrite lo exige; el usuario nunca lo ve).
+  /// Email interno generado desde los dígitos del teléfono.
+  /// Appwrite lo exige; el usuario nunca lo ve.
   String _emailFromPhone(String phone) => '${_digits(phone)}@conecta.app';
 
-  String _hash(String value, {bool pad = true}) {
-    int hash = 0;
-    for (int i = 0; i < value.length; i++) {
-      hash = ((hash << 5) - hash + value.codeUnitAt(i)) & 0xFFFFFFFF;
+  /// Genera una contraseña determinista de al menos 16 caracteres
+  /// usando solo caracteres alfanuméricos (sin $, +, etc.).
+  String _passwordFromPhone(String phone) {
+    final digits = _digits(phone);
+
+    // Hash simple pero estable
+    int h1 = 0x811c9dc5; // FNV offset basis
+    for (int i = 0; i < digits.length; i++) {
+      h1 = (h1 ^ digits.codeUnitAt(i)) & 0xFFFFFFFF;
+      h1 = (h1 * 0x01000193) & 0xFFFFFFFF;
     }
-    final hex = hash.abs().toRadixString(16);
-    return 'c\$${pad ? hex.padLeft(12, '0') : hex}';
+
+    // Segundo hash con seed diferente para más entropía
+    int h2 = 0;
+    for (int i = 0; i < digits.length; i++) {
+      h2 = ((h2 << 5) - h2 + digits.codeUnitAt(i)) & 0xFFFFFFFF;
+    }
+
+    final hex1 = h1.abs().toRadixString(16).padLeft(8, '0');
+    final hex2 = h2.abs().toRadixString(16).padLeft(8, '0');
+
+    // Resultado: "Cx" + 16 hex chars = 18 chars, siempre seguro para Appwrite
+    return 'Cx$hex1$hex2';
   }
 
-  /// Contraseña actual (estable).
-  String _passwordFromPhone(String phone) => _hash(_digits(phone), pad: true);
-
-  /// Variantes antiguas para no romper cuentas ya creadas.
-  List<({String email, String password})> _credentialVariants(String phone) {
-    final normalized = normalizePhone(phone);
+  /// Contraseña legacy para compatibilidad con cuentas antiguas.
+  String _legacyPassword(String phone) {
     final digits = _digits(phone);
-    final email = _emailFromPhone(phone);
-    final legacyEmail = '$normalized@conecta.app';
-
-    return [
-      (email: email, password: _passwordFromPhone(phone)),
-      (email: email, password: _hash(digits, pad: false)),
-      (email: email, password: _hash(normalized, pad: true)),
-      (email: email, password: _hash(normalized, pad: false)),
-      (email: legacyEmail, password: _hash(normalized, pad: false)),
-      (email: legacyEmail, password: _hash(normalized, pad: true)),
-      (email: legacyEmail, password: _hash(digits, pad: false)),
-      (email: legacyEmail, password: _hash(digits, pad: true)),
-    ];
+    int hash = 0;
+    for (int i = 0; i < digits.length; i++) {
+      hash = ((hash << 5) - hash + digits.codeUnitAt(i)) & 0xFFFFFFFF;
+    }
+    final hex = hash.abs().toRadixString(16);
+    return 'c\$${hex.padLeft(12, '0')}';
   }
 
   String _friendlyError(AppwriteException e, {required bool isRegister}) {
@@ -65,13 +72,12 @@ class AuthService {
           ? 'No se pudo crear la cuenta. Revisa tu número.'
           : 'Número no registrado o incorrecto. ¿Ya creaste tu cuenta?';
     }
-    if (code == 401 && (raw.contains('permission') || type.contains('unauthorized'))) {
-      return 'Sin permisos en Appwrite. Revisa la colección users.';
-    }
     if (raw.contains('rate limit') || code == 429) {
       return 'Demasiados intentos. Espera un momento e intenta de nuevo.';
     }
-    if (raw.contains('network') || raw.contains('socket') || raw.contains('failed host lookup')) {
+    if (raw.contains('network') ||
+        raw.contains('socket') ||
+        raw.contains('failed host lookup')) {
       return 'Sin conexión. Revisa tu internet e intenta de nuevo.';
     }
     if (raw.contains('session') && raw.contains('prohibited')) {
@@ -92,14 +98,46 @@ class AuthService {
     } catch (_) {}
   }
 
-  /// Crea cuenta + inicia sesión + guarda perfil (orden correcto).
+  /// Intenta iniciar sesión con la contraseña nueva, si falla prueba la legacy.
+  Future<Session> _tryLogin(String email, String phone) async {
+    final passwords = [
+      _passwordFromPhone(phone),
+      _legacyPassword(phone),
+    ];
+
+    AppwriteException? lastError;
+
+    for (final password in passwords) {
+      try {
+        debugPrint('Intentando login con email=$email password=${password.substring(0, 4)}...');
+        return await account.createEmailPasswordSession(
+          email: email,
+          password: password,
+        );
+      } on AppwriteException catch (e) {
+        lastError = e;
+        debugPrint('Login fallido con variante: ${e.message}');
+        continue;
+      }
+    }
+
+    throw lastError ?? AppwriteException('Invalid credentials');
+  }
+
+  /// Crea cuenta + inicia sesión + guarda perfil.
   Future<User> register({
     required String name,
     required String phone,
   }) async {
-    final normalized = normalizePhone(phone);
-    final email = _emailFromPhone(normalized);
-    final password = _passwordFromPhone(normalized);
+    final digits = _digits(phone);
+    final email = _emailFromPhone(digits);
+    final password = _passwordFromPhone(digits);
+
+    debugPrint('=== REGISTRO ===');
+    debugPrint('Phone input: $phone');
+    debugPrint('Digits: $digits');
+    debugPrint('Email: $email');
+    debugPrint('Password: ${password.substring(0, 4)}... (${password.length} chars)');
 
     await _clearExistingSession();
 
@@ -112,11 +150,19 @@ class AuthService {
         email: email,
         password: password,
       );
+      debugPrint('Cuenta creada: ${user.$id}');
     } on AppwriteException catch (e) {
-      // Si ya existe, intentamos iniciar sesión con ese número
       if (e.code == 409 ||
           (e.message ?? '').toLowerCase().contains('already exists')) {
-        await login(phone: normalized);
+        // Ya existe → intentar login
+        debugPrint('Cuenta ya existe, intentando login...');
+        await _clearExistingSession();
+        try {
+          await _tryLogin(email, digits);
+        } catch (_) {
+          throw Exception('Este número ya está registrado. Usa Iniciar Sesión.');
+        }
+
         final current = await getCurrentUser();
         if (current == null) {
           throw Exception('Este número ya está registrado. Inicia sesión.');
@@ -124,17 +170,19 @@ class AuthService {
         await ensureUserProfile(
           userId: current.$id,
           name: name,
-          phone: normalized,
+          phone: normalizePhone(phone),
         );
         return current;
       }
       throw Exception(_friendlyError(e, isRegister: true));
     }
 
-    // IMPORTANTE: primero sesión, luego documento en la DB
+    // Crear sesión después de registrar
     try {
       await account.createEmailPasswordSession(email: email, password: password);
-    } on AppwriteException {
+      debugPrint('Sesión creada exitosamente');
+    } on AppwriteException catch (e) {
+      debugPrint('Error creando sesión post-registro: ${e.message}');
       throw Exception(
         'Cuenta creada, pero no se pudo iniciar sesión. Prueba Iniciar Sesión con el mismo número.',
       );
@@ -143,50 +191,43 @@ class AuthService {
     await ensureUserProfile(
       userId: user.$id,
       name: name,
-      phone: normalized,
+      phone: normalizePhone(phone),
     );
 
     return user;
   }
 
+  /// Inicia sesión con un número de teléfono.
   Future<Session> login({required String phone}) async {
-    final normalized = normalizePhone(phone);
+    final digits = _digits(phone);
+    final email = _emailFromPhone(digits);
+
+    debugPrint('=== LOGIN ===');
+    debugPrint('Phone input: $phone');
+    debugPrint('Digits: $digits');
+    debugPrint('Email: $email');
+
     await _clearExistingSession();
 
-    AppwriteException? lastError;
+    try {
+      final session = await _tryLogin(email, digits);
 
-    for (final creds in _credentialVariants(normalized)) {
-      try {
-        final session = await account.createEmailPasswordSession(
-          email: creds.email,
-          password: creds.password,
-        );
+      // Asegurar perfil si faltaba
+      final user = await account.get();
+      await ensureUserProfile(
+        userId: user.$id,
+        name: user.name.isNotEmpty ? user.name : 'Usuario',
+        phone: normalizePhone(phone),
+      );
 
-        // Asegurar perfil si faltaba (registro a medias)
-        final user = await account.get();
-        await ensureUserProfile(
-          userId: user.$id,
-          name: user.name.isNotEmpty ? user.name : 'Usuario',
-          phone: normalized,
-        );
-
-        return session;
-      } on AppwriteException catch (e) {
-        lastError = e;
-        // Probar siguiente variante de credenciales
-        continue;
-      }
+      debugPrint('Login exitoso: ${user.$id}');
+      return session;
+    } on AppwriteException catch (e) {
+      throw Exception(_friendlyError(e, isRegister: false));
     }
-
-    throw Exception(
-      _friendlyError(
-        lastError ?? AppwriteException('Invalid credentials'),
-        isRegister: false,
-      ),
-    );
   }
 
-  /// Crea el perfil si no existe; si ya existe, no falla.
+  /// Crea el perfil en la DB si no existe; si ya existe, no falla.
   Future<void> ensureUserProfile({
     required String userId,
     required String name,
@@ -212,7 +253,7 @@ class AuthService {
       'createdAt': DateTime.now().toIso8601String(),
     };
 
-    // Guardar también en prefs del account (fallback si la DB no tiene permisos)
+    // Guardar también en prefs del account (fallback)
     try {
       await account.updatePrefs(prefs: {
         'name': name,
@@ -237,7 +278,7 @@ class AuthService {
       );
     } on AppwriteException catch (e) {
       if (e.code == 409) return;
-      // Reintento sin permissions explícitos (usa defaults de la colección)
+      // Reintento sin permissions explícitos
       try {
         await databases.createDocument(
           databaseId: AppwriteConfig.databaseId,
@@ -248,25 +289,9 @@ class AuthService {
       } on AppwriteException catch (e2) {
         if (e2.code == 409) return;
         debugPrint('ensureUserProfile error: ${e2.message}');
-        // No bloquear login/registro: la sesión ya existe
       }
     }
   }
-
-  @Deprecated('Usa register()')
-  Future<User> createAccount({
-    required String name,
-    required String phone,
-  }) =>
-      register(name: name, phone: phone);
-
-  @Deprecated('Usa ensureUserProfile()')
-  Future<void> saveUserProfile({
-    required String userId,
-    required String name,
-    required String phone,
-  }) =>
-      ensureUserProfile(userId: userId, name: name, phone: phone);
 
   Future<User?> getCurrentUser() async {
     try {
