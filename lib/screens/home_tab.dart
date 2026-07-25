@@ -308,7 +308,11 @@ class _HomeTabState extends State<HomeTab> {
         separatorBuilder: (context, index) => const SizedBox(width: 16),
         itemBuilder: (context, index) {
           final user = _contactUsers[index];
-          final name = user.data['name'] ?? 'Usuario';
+          final rawName = (user.data['name'] ?? '').toString();
+          final phone = (user.data['phone'] ?? '').toString();
+          final name = (rawName.isNotEmpty && rawName != 'Usuario')
+              ? rawName
+              : (phone.isNotEmpty ? phone : 'Contacto');
           final avatar = user.data['avatar'] ?? '';
           final status = user.data['status'] ?? 'offline';
           final isOnline = status == 'online';
@@ -445,10 +449,14 @@ class _HomeTabState extends State<HomeTab> {
           future: _getUserInfo(otherUserId),
           builder: (context, snapshot) {
             final otherUser = snapshot.data;
-            final name = otherUser?.data['name'] ?? 'Usuario';
+            final rawName = (otherUser?.data['name'] ?? '').toString();
+            final rawPhone = (otherUser?.data['phone'] ?? '').toString();
+            final name = (rawName.isNotEmpty && rawName != 'Usuario')
+                ? rawName
+                : (rawPhone.isNotEmpty ? rawPhone : 'Contacto');
             final avatar = otherUser?.data['avatar'] ?? '';
             final lastMessage = chat.data['lastMessage'] ?? '';
-            final updatedAt = chat.data['updatedAt']?.toString() ?? '';
+            final updatedAt = chat.data['updatedAt']?.toString() ?? chat.data['lastMessageTime']?.toString() ?? '';
 
             return GestureDetector(
               onTap: () {
@@ -513,7 +521,7 @@ class _HomeTabState extends State<HomeTab> {
                           const SizedBox(height: 5),
                           Text(
                             lastMessage.toString().isEmpty
-                                ? 'Nueva conversación'
+                                ? 'Inicia la conversación...'
                                 : lastMessage.toString(),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

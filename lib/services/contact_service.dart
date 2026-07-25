@@ -113,49 +113,71 @@ class ContactService {
   }
 
   /// Obtener todos los contactos de un usuario.
-  /// Si la colección 'contacts' no existe, obtiene los participantes de chats como contactos.
   Future<List<Document>> getContacts(String userId) async {
+    // 1. Intentar consulta filtrada
     try {
       final result = await databases.listDocuments(
         databaseId: AppwriteConfig.databaseId,
         collectionId: AppwriteConfig.contactsCollectionId,
         queries: [
           Query.equal('userId', userId),
-          Query.orderDesc('createdAt'),
           Query.limit(100),
         ],
       );
-      return result.documents;
+      if (result.documents.isNotEmpty) {
+        return result.documents;
+      }
+    } on AppwriteException catch (e) {
+      debugPrint('Error en query de contactos: ${e.message}');
+    }
+
+    // 2. Fallback: listar todos los documentos de la colección 'contacts' y filtrar por userId en Dart
+    try {
+      final allContacts = await databases.listDocuments(
+        databaseId: AppwriteConfig.databaseId,
+        collectionId: AppwriteConfig.contactsCollectionId,
+        queries: [Query.limit(100)],
+      );
+      final userContacts = allContacts.documents.where((d) {
+        return d.data['userId'] == userId;
+      }).toList();
+
+      if (userContacts.isNotEmpty) {
+        return userContacts;
+      }
     } on AppwriteException catch (e) {
       debugPrint('Contacts collection fallback: ${e.message}');
+    }
 
-      // Fallback: extraer contactos a partir de los chats activos
-      try {
-        final userChats = await _chatService.getUserChats(userId);
-        final List<Document> chatContacts = [];
-        for (final chat in userChats) {
-          final participants = List<String>.from(chat.data['participants'] ?? []);
-          final otherId = participants.firstWhere((id) => id != userId, orElse: () => '');
-          if (otherId.isNotEmpty) {
-            chatContacts.add(Document(
-              $id: chat.$id,
-              $collectionId: AppwriteConfig.contactsCollectionId,
-              $databaseId: AppwriteConfig.databaseId,
-              $createdAt: chat.$createdAt,
-              $updatedAt: chat.$updatedAt,
-              $permissions: [],
-              data: {
-                'userId': userId,
-                'contactUserId': otherId,
-                'phone': '',
-              },
-            ));
-          }
+    // 3. Fallback final: extraer contactos a partir de los chats activos del usuario
+    try {
+      final userChats = await _chatService.getUserChats(userId);
+      final List<Document> chatContacts = [];
+      final Set<String> seenUserIds = {};
+
+      for (final chat in userChats) {
+        final participants = List<String>.from(chat.data['participants'] ?? []);
+        final otherId = participants.firstWhere((id) => id != userId, orElse: () => '');
+        if (otherId.isNotEmpty && !seenUserIds.contains(otherId)) {
+          seenUserIds.add(otherId);
+          chatContacts.add(Document(
+            $id: chat.$id,
+            $collectionId: AppwriteConfig.contactsCollectionId,
+            $databaseId: AppwriteConfig.databaseId,
+            $createdAt: chat.$createdAt,
+            $updatedAt: chat.$updatedAt,
+            $permissions: [],
+            data: {
+              'userId': userId,
+              'contactUserId': otherId,
+              'phone': '',
+            },
+          ));
         }
-        return chatContacts;
-      } catch (_) {
-        return [];
       }
+      return chatContacts;
+    } catch (_) {
+      return [];
     }
   }
 

@@ -163,20 +163,40 @@ class AuthService {
     required String name,
     required String phone,
   }) async {
+    final normalizedPhone = normalizePhone(phone);
+
     try {
-      await databases.getDocument(
+      final doc = await databases.getDocument(
         databaseId: AppwriteConfig.databaseId,
         collectionId: AppwriteConfig.usersCollectionId,
         documentId: userId,
       );
+
+      final existingName = (doc.data['name'] ?? '').toString();
+      final existingPhone = (doc.data['phone'] ?? '').toString();
+
+      // Si el nombre guardado es 'Usuario' o está vacío y tenemos un nombre válido, actualizarlo
+      if ((existingName.isEmpty || existingName == 'Usuario') &&
+          name.isNotEmpty &&
+          name != 'Usuario') {
+        await databases.updateDocument(
+          databaseId: AppwriteConfig.databaseId,
+          collectionId: AppwriteConfig.usersCollectionId,
+          documentId: userId,
+          data: {
+            'name': name,
+            if (existingPhone.isEmpty) 'phone': normalizedPhone,
+          },
+        );
+      }
       return;
     } on AppwriteException {
-      // No existe, se procede a crear
+      // No existe el documento de usuario, se procede a crear
     }
 
     final data = {
-      'name': name,
-      'phone': normalizePhone(phone),
+      'name': name.isNotEmpty ? name : 'Usuario',
+      'phone': normalizedPhone,
       'avatar': '',
       'status': 'online',
       'createdAt': DateTime.now().toIso8601String(),
@@ -185,9 +205,11 @@ class AuthService {
     try {
       await account.updatePrefs(prefs: {
         'name': name,
-        'phone': normalizePhone(phone),
+        'phone': normalizedPhone,
       });
-      await account.updateName(name: name);
+      if (name.isNotEmpty && name != 'Usuario') {
+        await account.updateName(name: name);
+      }
     } catch (e) {
       debugPrint('Error actualizando prefs: $e');
     }

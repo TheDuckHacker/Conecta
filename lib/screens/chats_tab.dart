@@ -226,8 +226,13 @@ class _ChatsTabState extends State<ChatsTab> {
           .contains(_searchQuery.toLowerCase());
     }).toList();
 
-    // Mostrar contactos agregados o todos si busca
-    final displayList = _contactUsers;
+    // Mostrar contactos agregados o la lista de usuarios si busca o está vacía
+    final displayList = (_contactUsers.isNotEmpty && _searchQuery.isEmpty)
+        ? _contactUsers
+        : [
+            ..._contactUsers,
+            ..._allAppwriteUsers.where((u) => !_contactUsers.any((c) => c.$id == u.$id)),
+          ];
 
     final filteredContacts = displayList.where((user) {
       final name = (user.data['name'] ?? '').toString().toLowerCase();
@@ -522,10 +527,14 @@ class _ChatsTabState extends State<ChatsTab> {
           future: _getUserInfo(otherUserId),
           builder: (context, snapshot) {
             final otherUser = snapshot.data;
-            final name = otherUser?.data['name'] ?? 'Usuario';
+            final rawName = (otherUser?.data['name'] ?? '').toString();
+            final rawPhone = (otherUser?.data['phone'] ?? '').toString();
+            final name = (rawName.isNotEmpty && rawName != 'Usuario')
+                ? rawName
+                : (rawPhone.isNotEmpty ? rawPhone : 'Contacto');
             final avatar = otherUser?.data['avatar'] ?? '';
             final lastMessage = chat.data['lastMessage'] ?? '';
-            final updatedAt = chat.data['updatedAt']?.toString() ?? '';
+            final updatedAt = chat.data['updatedAt']?.toString() ?? chat.data['lastMessageTime']?.toString() ?? '';
 
             return GestureDetector(
               onTap: () {
@@ -610,7 +619,7 @@ class _ChatsTabState extends State<ChatsTab> {
                           const SizedBox(height: 5),
                           Text(
                             lastMessage.toString().isEmpty
-                                ? 'Nueva conversación'
+                                ? 'Inicia la conversación...'
                                 : lastMessage.toString(),
                             style: const TextStyle(
                                 color: _textMuted, fontSize: 13),
@@ -675,8 +684,11 @@ class _ChatsTabState extends State<ChatsTab> {
       separatorBuilder: (context, index) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final user = users[index];
-        final name = user.data['name'] ?? 'Usuario';
-        final phone = user.data['phone'] ?? '';
+        final rawName = (user.data['name'] ?? '').toString();
+        final phone = (user.data['phone'] ?? '').toString();
+        final name = (rawName.isNotEmpty && rawName != 'Usuario')
+            ? rawName
+            : (phone.isNotEmpty ? phone : 'Contacto');
         final avatar = user.data['avatar'] ?? '';
         final status = user.data['status'] ?? 'offline';
         final isOnline = status == 'online';
@@ -816,6 +828,8 @@ class _ChatsTabState extends State<ChatsTab> {
   }
 
   Future<Document?> _getUserInfo(String userId) async {
+    final match = _allAppwriteUsers.where((u) => u.$id == userId);
+    if (match.isNotEmpty) return match.first;
     return await _contactService.getUserById(userId);
   }
 }

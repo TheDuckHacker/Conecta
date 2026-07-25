@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:appwrite/models.dart';
 import 'package:conecta_lsb/services/chat_service.dart';
+import 'package:conecta_lsb/screens/video_call_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String chatId;
@@ -247,14 +248,51 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 ],
               ),
             ),
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.28),
-                shape: BoxShape.circle,
+            IconButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => VideoCallScreen(
+                      userName: widget.name,
+                      userAvatar: widget.avatar,
+                      isVideoCall: true,
+                    ),
+                  ),
+                );
+              },
+              icon: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.28),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.videocam_rounded, color: Colors.white, size: 20),
               ),
-              child: Icon(Icons.more_horiz_rounded, color: Colors.white.withValues(alpha: 0.95), size: 22),
+            ),
+            IconButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => VideoCallScreen(
+                      userName: widget.name,
+                      userAvatar: widget.avatar,
+                      isVideoCall: false,
+                    ),
+                  ),
+                );
+              },
+              icon: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.28),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.phone_rounded, color: Colors.white, size: 18),
+              ),
             ),
           ],
         ),
