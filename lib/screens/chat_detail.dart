@@ -44,6 +44,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   RealtimeSubscription? _subscription;
   StreamSubscription? _realtimeListen;
   Timer? _pollTimer;
+  Timer? _statusTimer;
+  bool _isFetching = false;
 
   static const _accent = Color(0xff37C8F2);
   static const _textDark = Color(0xff1A3A4A);
@@ -85,8 +87,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       debugPrint('Error resolving chat: $e');
     }
 
+    // Primera carga: fusiona duplicados una sola vez.
     await Future.wait([
-      _loadMessages(scroll: true),
+      _loadMessages(scroll: true, mergePair: true),
       _refreshOtherUserStatus(),
     ]);
     _subscribeToMessages();
@@ -98,10 +101,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     try {
       final user = await _contactService.getUserById(otherId);
       final online = (user?.data['status'] ?? '') == 'online';
-      if (mounted && online != _isOnline) {
+      if (!mounted) return;
+      if (online != _isOnline) {
         setState(() => _isOnline = online);
-      } else {
-        _isOnline = online;
       }
     } catch (e) {
       debugPrint('Error status: $e');
@@ -111,6 +113,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _statusTimer?.cancel();
     _realtimeListen?.cancel();
     _subscription?.close();
     _messageController.dispose();
@@ -120,43 +123,64 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _sortMessages() {
-    // Más viejo arriba, más nuevo abajo (hora del servidor).
     _messages.sort(
       (a, b) => ChatService.messageTime(a).compareTo(ChatService.messageTime(b)),
     );
   }
 
-  Future<void> _loadMessages({bool scroll = false}) async {
+  Future<void> _loadMessages({
+    bool scroll = false,
+    bool mergePair = false,
+  }) async {
+    if (_isFetching) return;
     if (_chatId.isEmpty && _pairChatIds.isEmpty) {
       if (mounted) setState(() => _isLoading = false);
       return;
     }
+
+    _isFetching = true;
     try {
       List<Document> loaded;
       final otherId = widget.otherUserId;
-      if (otherId != null && otherId.isNotEmpty) {
+
+      // mergePair solo al abrir: después solo el chat canónico (rápido).
+      if (mergePair && otherId != null && otherId.isNotEmpty) {
         loaded = await _chatService.getMessagesForPair(
           userId: widget.currentUserId,
           otherUserId: otherId,
           primaryChatId: _chatId,
+          knownChatIds: _pairChatIds.toList(),
         );
       } else {
         loaded = await _chatService.getMessages(_chatId);
       }
 
-      // Evitar parpadeo si no cambió nada
       final same = loaded.length == _messages.length &&
-          loaded.every((m) => _messages.any((e) => e.$id == m.$id));
+          (loaded.isEmpty ||
+              (loaded.isNotEmpty &&
+                  _messages.isNotEmpty &&
+                  loaded.last.$id == _messages.last.$id &&
+                  loaded.first.$id == _messages.first.$id));
+
+      if (!mounted) return;
+
       if (!same) {
-        _messages = List<Document>.from(loaded);
-        _sortMessages();
+        setState(() {
+          _messages = List<Document>.from(loaded);
+          _sortMessages();
+          _isLoading = false;
+        });
+        if (scroll) _scrollToBottom();
+      } else if (_isLoading) {
+        setState(() => _isLoading = false);
       }
     } catch (e) {
       debugPrint('Error loading messages: $e');
-    }
-    if (mounted) {
-      setState(() => _isLoading = false);
-      if (scroll) _scrollToBottom();
+      if (mounted && _isLoading) {
+        setState(() => _isLoading = false);
+      }
+    } finally {
+      _isFetching = false;
     }
   }
 
@@ -170,6 +194,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _realtimeListen?.cancel();
     _subscription?.close();
     _pollTimer?.cancel();
+    _statusTimer?.cancel();
     if (_chatId.isEmpty && _pairChatIds.isEmpty) return;
 
     try {
@@ -184,9 +209,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           if (!_isRelevantChatId(eventChatId)) return;
 
           final events = event.events;
-          final isCreate = events.any((e) => e.contains('.create'));
           final isDelete = events.any((e) => e.contains('.delete'));
-
           if (isDelete) {
             final id = payload['\$id']?.toString();
             if (id != null) {
@@ -195,18 +218,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             return;
           }
 
-          // Crear/actualizar: recargar para mantener orden y datos del servidor
-          if (isCreate || events.any((e) => e.contains('.update'))) {
-            _loadMessages(scroll: true);
-          } else {
-            // Algunos SDKs no mandan el sufijo; si es del chat, recargar
-            _loadMessages(scroll: true);
-          }
+          // Recarga liviana: solo el chat activo
+          _loadMessages(scroll: true);
         },
-        onError: (e) {
-          debugPrint('Realtime error: $e');
-          // Si cae el websocket, el poll sigue cubriendo
-        },
+        onError: (e) => debugPrint('Realtime error: $e'),
         onDone: () => debugPrint('Realtime cerrado'),
         cancelOnError: false,
       );
@@ -214,12 +229,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       debugPrint('No se pudo suscribir a realtime: $e');
     }
 
-    // Respaldo rápido: Appwrite realtime a veces no llega en emulador/red
-    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (mounted) {
-        _loadMessages();
-        _refreshOtherUserStatus();
-      }
+    // Poll liviano (1 sola request). No fusionar pares en cada tick.
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) _loadMessages();
+    });
+
+    // Estado online mucho menos frecuente
+    _statusTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+      if (mounted) _refreshOtherUserStatus();
     });
   }
 

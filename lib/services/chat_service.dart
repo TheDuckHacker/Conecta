@@ -194,20 +194,28 @@ class ChatService {
   }
 
   /// Mensajes de todos los chats entre dos personas (fusiona duplicados).
+  /// [knownChatIds] evita volver a listar todos los chats (caro).
   Future<List<Document>> getMessagesForPair({
     required String userId,
     required String otherUserId,
     String? primaryChatId,
+    List<String>? knownChatIds,
   }) async {
-    final chatIds = await chatIdsForPair(userId, otherUserId);
-    if (primaryChatId != null && primaryChatId.isNotEmpty) {
-      chatIds.add(primaryChatId);
+    final chatIds = <String>{
+      ...?knownChatIds,
+      if (primaryChatId != null && primaryChatId.isNotEmpty) primaryChatId,
+    };
+    if (chatIds.isEmpty) {
+      chatIds.addAll(await chatIdsForPair(userId, otherUserId));
     }
     if (chatIds.isEmpty) return [];
 
     final byId = <String, Document>{};
-    for (final id in chatIds.toSet()) {
-      final msgs = await getMessages(id);
+    // En paralelo, no uno tras otro
+    final batches = await Future.wait(
+      chatIds.map(getMessages),
+    );
+    for (final msgs in batches) {
       for (final m in msgs) {
         byId[m.$id] = m;
       }
@@ -296,21 +304,34 @@ class ChatService {
     required String participant2Id,
   }) async {
     try {
-      final userChats = await getUserChats(participant1Id);
-      for (final chat in userChats) {
-        final parts = parseParticipants(chat.data['participants']);
-        if (parts.contains(participant1Id) && parts.contains(participant2Id)) {
-          return chat;
+      Document? best;
+      // Una sola lectura de chats (sin cascadas de requests).
+      try {
+        final filtered = await databases.listDocuments(
+          databaseId: AppwriteConfig.databaseId,
+          collectionId: AppwriteConfig.chatsCollectionId,
+          queries: [
+            Query.equal('participants', participant1Id),
+            Query.limit(100),
+          ],
+        );
+        for (final chat in filtered.documents) {
+          final parts = parseParticipants(chat.data['participants']);
+          if (parts.contains(participant1Id) && parts.contains(participant2Id)) {
+            if (best == null || _chatScore(chat) > _chatScore(best)) {
+              best = chat;
+            }
+          }
         }
-      }
+      } catch (_) {}
 
-      // Buscar también en todos (por si hay duplicados no dedupeados aún)
+      if (best != null) return best;
+
       final all = await databases.listDocuments(
         databaseId: AppwriteConfig.databaseId,
         collectionId: AppwriteConfig.chatsCollectionId,
         queries: [Query.limit(100)],
       );
-      Document? best;
       for (final chat in all.documents) {
         final parts = parseParticipants(chat.data['participants']);
         if (parts.contains(participant1Id) && parts.contains(participant2Id)) {

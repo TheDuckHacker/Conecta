@@ -9,6 +9,7 @@ import 'chat_service.dart';
 class ContactService {
   final _chatService = ChatService();
   final Map<String, Document?> _userCache = {};
+  bool _didSyncContacts = false;
 
   static const _prefsKey = 'contactIds';
   static const _removedKey = 'removedContactIds';
@@ -154,24 +155,21 @@ class ContactService {
   }
 
   /// Contactos del usuario.
-  ///
-  /// Une prefs + personas con chat (recupera contactos perdidos).
-  /// Respeta los que el usuario eliminó a propósito.
   Future<List<Document>> getContacts(String userId) async {
     final ids = await _syncContactIdsFromChats(userId);
     if (ids.isEmpty) return [];
 
-    final List<Document> contacts = [];
-    for (final id in ids) {
-      if (id == userId) continue;
-      final user = await getUserById(id);
-      if (user != null) contacts.add(user);
-    }
-    return contacts;
+    final users = await Future.wait(
+      ids.where((id) => id != userId).map(getUserById),
+    );
+    return users.whereType<Document>().toList();
   }
 
   Future<List<String>> _syncContactIdsFromChats(String userId) async {
     final saved = await _getContactIds();
+    // No volver a sincronizar en cada apertura de pestaña (congela la UI).
+    if (_didSyncContacts) return saved;
+
     final removed = (await _getRemovedIds()).toSet();
     final merged = <String>{...saved};
 
@@ -187,6 +185,7 @@ class ContactService {
       debugPrint('syncContactIdsFromChats: $e');
     }
 
+    _didSyncContacts = true;
     final list = merged.toList();
     if (list.length != saved.length || list.any((id) => !saved.contains(id))) {
       try {
@@ -217,5 +216,8 @@ class ContactService {
     }
   }
 
-  void clearCache() => _userCache.clear();
+  void clearCache() {
+    _userCache.clear();
+    // No resetear _didSyncContacts: evita re-sincronizar y congelar.
+  }
 }
