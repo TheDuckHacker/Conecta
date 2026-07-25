@@ -7,6 +7,7 @@ class AppwriteConfig {
   static const String usersCollectionId = 'users';
   static const String chatsCollectionId = 'chats';
   static const String messagesCollectionId = 'messages';
+  static const String contactsCollectionId = 'contacts';
 }
 
 final Client appwriteClient = Client()

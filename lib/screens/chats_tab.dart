@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:appwrite/models.dart';
 import 'package:conecta_lsb/screens/chat_detail.dart';
 import 'package:conecta_lsb/screens/user_profile.dart';
+import 'package:conecta_lsb/screens/add_contact_screen.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/chat_service.dart';
+import 'package:conecta_lsb/services/contact_service.dart';
 import 'package:conecta_lsb/services/appwrite_config.dart';
 
 class ChatsTab extends StatefulWidget {
@@ -18,9 +20,13 @@ class _ChatsTabState extends State<ChatsTab> {
   String _searchQuery = "";
   final _authService = AuthService();
   final _chatService = ChatService();
+  final _contactService = ContactService();
+
   User? _currentUser;
   List<Document> _chats = [];
-  List<Document> _users = [];
+  List<Document> _contactDocs = [];
+  List<Document> _contactUsers = [];
+  List<Document> _allAppwriteUsers = [];
   bool _isLoading = true;
 
   static const _accent = Color(0xff37C8F2);
@@ -37,17 +43,63 @@ class _ChatsTabState extends State<ChatsTab> {
     try {
       _currentUser = await _authService.getCurrentUser();
       if (_currentUser != null) {
+        // Cargar chats
         _chats = await _chatService.getUserChats(_currentUser!.$id);
+
+        // Cargar todos los usuarios para fallback/búsqueda general
         final usersResult = await databases.listDocuments(
           databaseId: AppwriteConfig.databaseId,
           collectionId: AppwriteConfig.usersCollectionId,
         );
-        _users = usersResult.documents.where((u) => u.$id != _currentUser!.$id).toList();
+        _allAppwriteUsers = usersResult.documents
+            .where((u) => u.$id != _currentUser!.$id)
+            .toList();
+
+        // Cargar contactos del usuario desde la colección de contactos
+        _contactDocs = await _contactService.getContacts(_currentUser!.$id);
+
+        // Mapear documentos de contactos a documentos de usuario
+        final List<Document> loadedContacts = [];
+        for (final doc in _contactDocs) {
+          final contactUserId = doc.data['contactUserId']?.toString();
+          if (contactUserId != null) {
+            final userDoc = _allAppwriteUsers.firstWhere(
+              (u) => u.$id == contactUserId,
+              orElse: () => Document(
+                $id: contactUserId,
+                $collectionId: AppwriteConfig.usersCollectionId,
+                $databaseId: AppwriteConfig.databaseId,
+                $createdAt: '',
+                $updatedAt: '',
+                $permissions: [],
+                data: {
+                  'name': doc.data['phone'] ?? 'Contacto',
+                  'phone': doc.data['phone'] ?? '',
+                  'avatar': '',
+                  'status': 'offline',
+                },
+              ),
+            );
+            loadedContacts.add(userDoc);
+          }
+        }
+
+        _contactUsers = loadedContacts;
       }
     } catch (e) {
-      debugPrint('Error loading data: $e');
+      debugPrint('Error cargando datos de chats/contactos: $e');
     }
     if (mounted) setState(() => _isLoading = false);
+  }
+
+  Future<void> _openAddContactScreen() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddContactScreen()),
+    );
+    if (result == true) {
+      _loadData();
+    }
   }
 
   Future<void> _startChat(Document user) async {
@@ -81,8 +133,73 @@ class _ChatsTabState extends State<ChatsTab> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al crear chat: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error al crear chat: $e'),
+              backgroundColor: Colors.red),
         );
+      }
+    }
+  }
+
+  Future<void> _confirmRemoveContact(Document user) async {
+    final contactDoc = _contactDocs.firstWhere(
+      (doc) => doc.data['contactUserId'] == user.$id,
+      orElse: () => Document(
+        $id: '',
+        $collectionId: '',
+        $databaseId: '',
+        $createdAt: '',
+        $updatedAt: '',
+        $permissions: [],
+        data: {},
+      ),
+    );
+
+    if (contactDoc.$id.isEmpty) return;
+
+    final name = user.data['name'] ?? 'este contacto';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Eliminar contacto'),
+        content: Text('¿Deseas eliminar a $name de tus contactos?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Eliminar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await _contactService.removeContact(contactDoc.$id);
+        _loadData();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Contacto eliminado'),
+              backgroundColor: Color(0xff37C8F2),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+          );
+        }
       }
     }
   }
@@ -90,12 +207,21 @@ class _ChatsTabState extends State<ChatsTab> {
   @override
   Widget build(BuildContext context) {
     final filteredChats = _chats.where((chat) {
-      return chat.data['lastMessage'].toString().toLowerCase().contains(_searchQuery.toLowerCase());
+      return chat.data['lastMessage']
+          .toString()
+          .toLowerCase()
+          .contains(_searchQuery.toLowerCase());
     }).toList();
 
-    final filteredUsers = _users.where((user) {
-      final name = user.data['name'] ?? '';
-      return name.toLowerCase().contains(_searchQuery.toLowerCase());
+    // Si tiene contactos guardados, filtrar sus contactos; de lo contrario, mostrar lista general o mensaje
+    final displayList =
+        _contactUsers.isNotEmpty ? _contactUsers : _allAppwriteUsers;
+
+    final filteredContacts = displayList.where((user) {
+      final name = (user.data['name'] ?? '').toString().toLowerCase();
+      final phone = (user.data['phone'] ?? '').toString().toLowerCase();
+      final q = _searchQuery.toLowerCase();
+      return name.contains(q) || phone.contains(q);
     }).toList();
 
     if (_isLoading) {
@@ -113,20 +239,37 @@ class _ChatsTabState extends State<ChatsTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 12),
-                  const Text(
-                    'Mensajes',
-                    style: TextStyle(
-                      color: _textDark,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: -0.3,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Mensajes',
+                        style: TextStyle(
+                          color: _textDark,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _openAddContactScreen,
+                        icon: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: _accent.withValues(alpha: 0.15),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.person_add_rounded,
+                              color: _accent, size: 22),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
                     _isChatsTabSelected
                         ? '${filteredChats.length} conversaciones'
-                        : '${filteredUsers.length} contactos',
+                        : '${filteredContacts.length} contactos',
                     style: const TextStyle(color: _textMuted, fontSize: 14),
                   ),
                   const SizedBox(height: 18),
@@ -137,7 +280,7 @@ class _ChatsTabState extends State<ChatsTab> {
                   Expanded(
                     child: _isChatsTabSelected
                         ? _buildChatList(filteredChats)
-                        : _buildContactList(filteredUsers),
+                        : _buildContactList(filteredContacts),
                   ),
                 ],
               ),
@@ -146,23 +289,34 @@ class _ChatsTabState extends State<ChatsTab> {
               bottom: 24,
               right: 24,
               child: GestureDetector(
-                onTap: () => setState(() => _isChatsTabSelected = false),
+                onTap: () {
+                  if (!_isChatsTabSelected) {
+                    _openAddContactScreen();
+                  } else {
+                    setState(() => _isChatsTabSelected = false);
+                  }
+                },
                 child: Container(
                   width: 58,
                   height: 58,
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.45),
+                    color: _accent,
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.7), width: 1.5),
                     boxShadow: [
                       BoxShadow(
-                        color: _accent.withValues(alpha: 0.35),
+                        color: _accent.withValues(alpha: 0.40),
                         blurRadius: 18,
                         offset: const Offset(0, 8),
                       ),
                     ],
                   ),
-                  child: const Icon(Icons.edit_rounded, color: Colors.white, size: 24),
+                  child: Icon(
+                    _isChatsTabSelected
+                        ? Icons.edit_rounded
+                        : Icons.person_add_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
                 ),
               ),
             ),
@@ -189,11 +343,13 @@ class _ChatsTabState extends State<ChatsTab> {
       padding: const EdgeInsets.symmetric(horizontal: 18),
       child: Row(
         children: [
-          Icon(Icons.search_rounded, color: _accent.withValues(alpha: 0.55), size: 24),
+          Icon(Icons.search_rounded,
+              color: _accent.withValues(alpha: 0.55), size: 24),
           const SizedBox(width: 10),
           Expanded(
             child: TextField(
-              style: const TextStyle(color: _accent, fontSize: 15, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                  color: _accent, fontSize: 15, fontWeight: FontWeight.w500),
               onChanged: (val) => setState(() => _searchQuery = val),
               decoration: InputDecoration(
                 border: InputBorder.none,
@@ -263,7 +419,12 @@ class _ChatsTabState extends State<ChatsTab> {
     );
   }
 
-  Widget _buildEmptyState({required IconData icon, required String title, required String subtitle}) {
+  Widget _buildEmptyState({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    Widget? actionWidget,
+  }) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -284,7 +445,7 @@ class _ChatsTabState extends State<ChatsTab> {
                   ),
                 ],
               ),
-              child: Icon(icon, color: Colors.white, size: 36),
+              child: Icon(icon, color: _accent, size: 36),
             ),
             const SizedBox(height: 18),
             Text(
@@ -299,8 +460,13 @@ class _ChatsTabState extends State<ChatsTab> {
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: _textMuted, fontSize: 14, height: 1.4),
+              style: const TextStyle(
+                  color: _textMuted, fontSize: 14, height: 1.4),
             ),
+            if (actionWidget != null) ...[
+              const SizedBox(height: 20),
+              actionWidget,
+            ],
           ],
         ),
       ),
@@ -313,6 +479,17 @@ class _ChatsTabState extends State<ChatsTab> {
         icon: Icons.chat_bubble_outline_rounded,
         title: 'Sin chats recientes',
         subtitle: 'Ve a Contactos y empieza una conversación nueva',
+        actionWidget: ElevatedButton.icon(
+          onPressed: () => setState(() => _isChatsTabSelected = false),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _accent,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          icon: const Icon(Icons.people_outline_rounded, color: Colors.white),
+          label: const Text('Ver contactos',
+              style: TextStyle(color: Colors.white)),
+        ),
       );
     }
 
@@ -323,8 +500,11 @@ class _ChatsTabState extends State<ChatsTab> {
       separatorBuilder: (context, index) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final chat = chats[index];
-        final participants = List<String>.from(chat.data['participants'] ?? []);
-        final otherUserId = participants.firstWhere((id) => id != _currentUser?.$id, orElse: () => '');
+        final participants =
+            List<String>.from(chat.data['participants'] ?? []);
+        final otherUserId = participants.firstWhere(
+            (id) => id != _currentUser?.$id,
+            orElse: () => '');
 
         return FutureBuilder<Document?>(
           future: _getUserInfo(otherUserId),
@@ -351,11 +531,13 @@ class _ChatsTabState extends State<ChatsTab> {
                 ).then((_) => _loadData());
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.72),
                   borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.85)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.85)),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.04),
@@ -369,8 +551,10 @@ class _ChatsTabState extends State<ChatsTab> {
                     CircleAvatar(
                       radius: 28,
                       backgroundColor: const Color(0xffCDEFF7),
-                      backgroundImage: avatar.isNotEmpty ? NetworkImage(avatar) : null,
-                      onBackgroundImageError: avatar.isNotEmpty ? (_, __) {} : null,
+                      backgroundImage:
+                          avatar.isNotEmpty ? NetworkImage(avatar) : null,
+                      onBackgroundImageError:
+                          avatar.isNotEmpty ? (_, __) {} : null,
                       child: avatar.isEmpty
                           ? Text(
                               name.isNotEmpty ? name[0].toUpperCase() : '?',
@@ -416,7 +600,8 @@ class _ChatsTabState extends State<ChatsTab> {
                             lastMessage.toString().isEmpty
                                 ? 'Nueva conversación'
                                 : lastMessage.toString(),
-                            style: const TextStyle(color: _textMuted, fontSize: 13),
+                            style: const TextStyle(
+                                color: _textMuted, fontSize: 13),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -424,7 +609,8 @@ class _ChatsTabState extends State<ChatsTab> {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Icon(Icons.chevron_right_rounded, color: _accent.withValues(alpha: 0.45), size: 22),
+                    Icon(Icons.chevron_right_rounded,
+                        color: _accent.withValues(alpha: 0.45), size: 22),
                   ],
                 ),
               ),
@@ -451,9 +637,22 @@ class _ChatsTabState extends State<ChatsTab> {
   Widget _buildContactList(List<Document> users) {
     if (users.isEmpty) {
       return _buildEmptyState(
-        icon: Icons.people_outline_rounded,
-        title: 'Sin contactos',
-        subtitle: 'Cuando haya más usuarios registrados aparecerán aquí',
+        icon: Icons.person_add_alt_1_rounded,
+        title: 'Sin contactos guardados',
+        subtitle:
+            'Agrega contactos usando su número de teléfono para chatear fácilmente con ellos.',
+        actionWidget: ElevatedButton.icon(
+          onPressed: _openAddContactScreen,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _accent,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          ),
+          icon: const Icon(Icons.person_add_rounded, color: Colors.white),
+          label: const Text('Agregar contacto',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        ),
       );
     }
 
@@ -465,23 +664,16 @@ class _ChatsTabState extends State<ChatsTab> {
       itemBuilder: (context, index) {
         final user = users[index];
         final name = user.data['name'] ?? 'Usuario';
+        final phone = user.data['phone'] ?? '';
         final avatar = user.data['avatar'] ?? '';
         final status = user.data['status'] ?? 'offline';
         final isOnline = status == 'online';
+        final isSavedContact =
+            _contactDocs.any((d) => d.data['contactUserId'] == user.$id);
 
         return GestureDetector(
           onTap: () => _startChat(user),
-          onLongPress: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => UserProfileScreen(
-                  userId: user.$id,
-                  currentUserId: _currentUser!.$id,
-                ),
-              ),
-            ).then((_) => _loadData());
-          },
+          onLongPress: isSavedContact ? () => _confirmRemoveContact(user) : null,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
@@ -504,8 +696,10 @@ class _ChatsTabState extends State<ChatsTab> {
                     CircleAvatar(
                       radius: 26,
                       backgroundColor: const Color(0xffCDEFF7),
-                      backgroundImage: avatar.isNotEmpty ? NetworkImage(avatar) : null,
-                      onBackgroundImageError: avatar.isNotEmpty ? (_, __) {} : null,
+                      backgroundImage:
+                          avatar.isNotEmpty ? NetworkImage(avatar) : null,
+                      onBackgroundImageError:
+                          avatar.isNotEmpty ? (_, __) {} : null,
                       child: avatar.isEmpty
                           ? Text(
                               name.isNotEmpty ? name[0].toUpperCase() : '?',
@@ -524,7 +718,9 @@ class _ChatsTabState extends State<ChatsTab> {
                         width: 13,
                         height: 13,
                         decoration: BoxDecoration(
-                          color: isOnline ? const Color(0xff2ECC71) : const Color(0xffB0BEC5),
+                          color: isOnline
+                              ? const Color(0xff2ECC71)
+                              : const Color(0xffB0BEC5),
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
                         ),
@@ -547,11 +743,14 @@ class _ChatsTabState extends State<ChatsTab> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        isOnline ? 'En línea' : 'Desconectado',
+                        phone.isNotEmpty
+                            ? phone
+                            : (isOnline ? 'En línea' : 'Desconectado'),
                         style: TextStyle(
-                          color: isOnline ? const Color(0xff2ECC71) : _textMuted,
+                          color: isOnline && phone.isEmpty
+                              ? const Color(0xff2ECC71)
+                              : _textMuted,
                           fontSize: 13,
-                          fontWeight: isOnline ? FontWeight.w600 : FontWeight.normal,
                         ),
                       ),
                     ],
@@ -566,25 +765,36 @@ class _ChatsTabState extends State<ChatsTab> {
                   ),
                   child: IconButton(
                     padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.chat_bubble_rounded, color: _accent, size: 18),
+                    icon: const Icon(Icons.chat_bubble_rounded,
+                        color: _accent, size: 18),
                     onPressed: () => _startChat(user),
                   ),
                 ),
-                const SizedBox(width: 4),
-                IconButton(
-                  icon: Icon(Icons.info_outline_rounded, color: _textMuted.withValues(alpha: 0.8), size: 20),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => UserProfileScreen(
-                          userId: user.$id,
-                          currentUserId: _currentUser!.$id,
+                if (isSavedContact) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline_rounded,
+                        color: Colors.redAccent, size: 20),
+                    onPressed: () => _confirmRemoveContact(user),
+                  ),
+                ] else ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: Icon(Icons.info_outline_rounded,
+                        color: _textMuted.withValues(alpha: 0.8), size: 20),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => UserProfileScreen(
+                            userId: user.$id,
+                            currentUserId: _currentUser!.$id,
+                          ),
                         ),
-                      ),
-                    ).then((_) => _loadData());
-                  },
-                ),
+                      ).then((_) => _loadData());
+                    },
+                  ),
+                ],
               ],
             ),
           ),
