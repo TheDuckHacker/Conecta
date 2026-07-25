@@ -264,8 +264,12 @@ class AuthService {
 
   Future<User?> getCurrentUser() async {
     try {
-      return await account.get();
+      // Sin timeout la app se queda eternamente en el splash si no hay red.
+      return await account.get().timeout(const Duration(seconds: 8));
     } on AppwriteException {
+      return null;
+    } catch (e) {
+      debugPrint('getCurrentUser: $e');
       return null;
     }
   }

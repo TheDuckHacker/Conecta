@@ -13,39 +13,41 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   int _currentIndex = 0;
+  // Lazy: no crear todas las pestañas al inicio (evita colgar el logo/splash).
+  final Map<int, Widget> _pageCache = {};
 
-  // Pages to display in the body
-  late final List<Widget> _pages;
-
-  @override
-  void initState() {
-    super.initState();
-    _pages = [
-      HomeTab(
-        onStartCamera: () {
-          setState(() {
-            _currentIndex = 2; // Navigate to Translation Tab (Center Camera)
-          });
-        },
-      ),
-      const ChatsTab(),
-      const TranslationTab(),
-      const AcademyTab(),
-      const SettingsTab(),
-    ];
+  Widget _pageFor(int index) {
+    return _pageCache.putIfAbsent(index, () {
+      switch (index) {
+        case 0:
+          return HomeTab(
+            onStartCamera: () {
+              setState(() => _currentIndex = 2);
+            },
+          );
+        case 1:
+          return const ChatsTab();
+        case 2:
+          return const TranslationTab();
+        case 3:
+          return const AcademyTab();
+        case 4:
+        default:
+          return const SettingsTab();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        automaticallyImplyLeading: false, // Prevents back button on main screen
-        backgroundColor: const Color(0xff27C7D9), // Turquoise matching requirements
+        automaticallyImplyLeading: false,
+        backgroundColor: const Color(0xff27C7D9),
         elevation: 0,
         titleSpacing: 20,
         title: Row(
           children: [
-            // User Avatar
             Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
@@ -54,12 +56,10 @@ class _ChatScreenState extends State<ChatScreen> {
               child: const CircleAvatar(
                 radius: 18,
                 backgroundColor: Colors.white24,
-                backgroundImage: NetworkImage('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'),
                 child: Icon(Icons.person, color: Colors.white, size: 18),
               ),
             ),
             const SizedBox(width: 12),
-            // App Title
             const Text(
               "Conecta",
               style: TextStyle(
@@ -72,7 +72,6 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         actions: [
-          // Notification Bell
           IconButton(
             icon: const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 26),
             onPressed: () {
@@ -99,7 +98,7 @@ class _ChatScreenState extends State<ChatScreen> {
             end: Alignment.bottomCenter,
           ),
         ),
-        child: _pages[_currentIndex],
+        child: _pageFor(_currentIndex),
       ),
       bottomNavigationBar: _buildCustomBottomNavigationBar(),
     );

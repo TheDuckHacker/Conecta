@@ -41,9 +41,16 @@ class _ChatsTabState extends State<ChatsTab> {
       _currentUser = await _authService.getCurrentUser();
       if (_currentUser != null) {
         _contactService.clearCache();
-        _chats = await _chatService.getUserChats(_currentUser!.$id);
-        // Solo contactos que el usuario agregó explícitamente
-        _contactUsers = await _contactService.getContacts(_currentUser!.$id);
+        final results = await Future.wait([
+          _chatService
+              .getUserChats(_currentUser!.$id)
+              .timeout(const Duration(seconds: 10), onTimeout: () => <Document>[]),
+          _contactService
+              .getContacts(_currentUser!.$id)
+              .timeout(const Duration(seconds: 10), onTimeout: () => <Document>[]),
+        ]);
+        _chats = results[0];
+        _contactUsers = results[1];
       }
     } catch (e) {
       debugPrint('Error cargando datos de chats/contactos: $e');

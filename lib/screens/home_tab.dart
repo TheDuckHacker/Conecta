@@ -39,8 +39,17 @@ class _HomeTabState extends State<HomeTab> {
       _currentUser = await _authService.getCurrentUser();
       if (_currentUser != null) {
         _contactService.clearCache();
-        _chats = await _chatService.getUserChats(_currentUser!.$id);
-        _contactUsers = await _contactService.getContacts(_currentUser!.$id);
+        // Timeouts: si Appwrite no responde, no dejar la UI en loading eterno
+        final results = await Future.wait([
+          _chatService
+              .getUserChats(_currentUser!.$id)
+              .timeout(const Duration(seconds: 10), onTimeout: () => <Document>[]),
+          _contactService
+              .getContacts(_currentUser!.$id)
+              .timeout(const Duration(seconds: 10), onTimeout: () => <Document>[]),
+        ]);
+        _chats = results[0];
+        _contactUsers = results[1];
       }
     } catch (e) {
       debugPrint('Error cargando home tab: $e');

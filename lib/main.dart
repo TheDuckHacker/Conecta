@@ -5,7 +5,6 @@ import 'package:conecta_lsb/services/auth_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // Evita que errores de red/realtime tumben la app
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('FlutterError: ${details.exceptionAsString()}');
@@ -40,13 +39,41 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   final _authService = AuthService();
-  late final Future _authFuture = _authService.getCurrentUser();
+  bool _checking = true;
+  bool _hasSession = false;
   bool _markedOnline = false;
+  String? _userId;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _checkSession();
+  }
+
+  Future<void> _checkSession() async {
+    try {
+      final user = await _authService.getCurrentUser();
+      if (!mounted) return;
+      setState(() {
+        _hasSession = user != null;
+        _userId = user?.$id;
+        _checking = false;
+      });
+      if (user != null && !_markedOnline) {
+        _markedOnline = true;
+        // No bloquear la UI esperando el status
+        _authService.setOnlineStatus(user.$id, true);
+      }
+    } catch (e) {
+      debugPrint('Auth check failed: $e');
+      if (mounted) {
+        setState(() {
+          _hasSession = false;
+          _checking = false;
+        });
+      }
+    }
   }
 
   @override
@@ -58,16 +85,15 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     try {
-      final user = await _authService.getCurrentUser();
-      if (user == null) return;
+      final userId = _userId;
+      if (userId == null) return;
 
-      // Solo paused/resumed: "inactive" se dispara al abrir teclado y NO debe marcar offline
       if (state == AppLifecycleState.resumed) {
-        await _authService.setOnlineStatus(user.$id, true);
+        await _authService.setOnlineStatus(userId, true);
         _markedOnline = true;
       } else if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.detached) {
-        await _authService.setOnlineStatus(user.$id, false);
+        await _authService.setOnlineStatus(userId, false);
         _markedOnline = false;
       }
     } catch (e) {
@@ -77,28 +103,32 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: _authFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator(color: Color(0xff37C8F2))),
-          );
-        }
+    if (_checking) {
+      return const Scaffold(
+        backgroundColor: Color(0xffE8F4F8),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: Color(0xff37C8F2)),
+              SizedBox(height: 16),
+              Text(
+                'Cargando...',
+                style: TextStyle(
+                  color: Color(0xff1A3A4A),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
-        if (snapshot.hasData && snapshot.data != null) {
-          if (!_markedOnline) {
-            _markedOnline = true;
-            // Fuera del build síncrono
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _authService.setOnlineStatus(snapshot.data!.$id, true);
-            });
-          }
-          return const ChatScreen();
-        }
+    if (_hasSession) {
+      return const ChatScreen();
+    }
 
-        return const Login();
-      },
-    );
+    return const Login();
   }
 }
