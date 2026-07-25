@@ -203,10 +203,12 @@ class AuthService {
     };
 
     try {
-      await account.updatePrefs(prefs: {
-        'name': name,
-        'phone': normalizedPhone,
-      });
+      // IMPORTANTE: fusionar prefs para no borrar contactIds
+      final current = await account.get();
+      final prefs = Map<String, dynamic>.from(current.prefs.data);
+      prefs['name'] = name;
+      prefs['phone'] = normalizedPhone;
+      await account.updatePrefs(prefs: prefs);
       if (name.isNotEmpty && name != 'Usuario') {
         await account.updateName(name: name);
       }

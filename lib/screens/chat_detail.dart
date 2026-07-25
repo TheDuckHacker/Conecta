@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:appwrite/models.dart';
 import 'package:appwrite/appwrite.dart' show RealtimeSubscription;
 import 'package:conecta_lsb/services/chat_service.dart';
+import 'package:conecta_lsb/services/contact_service.dart';
 import 'package:conecta_lsb/screens/video_call_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
@@ -32,10 +33,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   final _chatService = ChatService();
+  final _contactService = ContactService();
   final _focusNode = FocusNode();
   List<Document> _messages = [];
   bool _isLoading = true;
   bool _isSending = false;
+  bool _isOnline = false;
   String _chatId = '';
   RealtimeSubscription? _subscription;
   Timer? _pollTimer;
@@ -48,6 +51,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   void initState() {
     super.initState();
     _chatId = widget.chatId;
+    _isOnline = widget.isActive;
     _initChat();
   }
 
@@ -67,8 +71,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         debugPrint('Error creating chat: $e');
       }
     }
-    await _loadMessages();
+    await Future.wait([
+      _loadMessages(),
+      _refreshOtherUserStatus(),
+    ]);
     _subscribeToMessages();
+  }
+
+  Future<void> _refreshOtherUserStatus() async {
+    final otherId = widget.otherUserId;
+    if (otherId == null || otherId.isEmpty) return;
+    try {
+      final user = await _contactService.getUserById(otherId);
+      final online = (user?.data['status'] ?? '') == 'online';
+      if (mounted && online != _isOnline) {
+        setState(() => _isOnline = online);
+      } else {
+        _isOnline = online;
+      }
+    } catch (e) {
+      debugPrint('Error status: $e');
+    }
   }
 
   @override
@@ -110,9 +133,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       }
     });
 
-    // Backup: refrescar cada 3s por si realtime falla
+    // Backup: refrescar mensajes y estado en línea cada 3s
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (mounted) _loadMessages();
+      if (mounted) {
+        _loadMessages();
+        _refreshOtherUserStatus();
+      }
     });
   }
 
@@ -247,13 +273,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         width: 7,
                         height: 7,
                         decoration: BoxDecoration(
-                          color: widget.isActive ? const Color(0xff2ECC71) : Colors.white54,
+                          color: _isOnline ? const Color(0xff2ECC71) : Colors.white54,
                           shape: BoxShape.circle,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        widget.isActive ? 'En línea' : 'Desconectado',
+                        _isOnline ? 'En línea' : 'Desconectado',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.85),
                           fontSize: 12,

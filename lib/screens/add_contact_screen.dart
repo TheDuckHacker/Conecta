@@ -3,7 +3,6 @@ import 'package:appwrite/models.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/contact_service.dart';
 import 'package:conecta_lsb/screens/chat_detail.dart';
-import 'package:conecta_lsb/services/chat_service.dart';
 
 class AddContactScreen extends StatefulWidget {
   const AddContactScreen({super.key});
@@ -16,7 +15,6 @@ class _AddContactScreenState extends State<AddContactScreen> {
   final _phoneController = TextEditingController();
   final _contactService = ContactService();
   final _authService = AuthService();
-  final _chatService = ChatService();
 
   bool _isSearching = false;
   bool _isAdding = false;
@@ -185,25 +183,28 @@ class _AddContactScreenState extends State<AddContactScreen> {
     if (currentUser == null) return;
 
     try {
-      Document? existingChat = await _chatService.findExistingChat(
-        participant1Id: currentUser.$id,
-        participant2Id: _foundUser!.$id,
+      // Guardar como contacto y abrir chat
+      final localDigits =
+          _phoneController.text.trim().replaceAll(RegExp(r'[^0-9]'), '');
+      final fullPhone = '$_selectedCountryCode$localDigits';
+
+      final chat = await _contactService.addContact(
+        userId: currentUser.$id,
+        contactUserId: _foundUser!.$id,
+        phone: fullPhone,
       );
 
-      existingChat ??= await _chatService.createChat(
-        participant1Id: currentUser.$id,
-        participant2Id: _foundUser!.$id,
-      );
+      final isOnline = (_foundUser!.data['status'] ?? '') == 'online';
 
       if (mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
             builder: (_) => ChatDetailScreen(
-              chatId: existingChat!.$id,
+              chatId: chat.$id,
               name: _foundUser!.data['name'] ?? 'Usuario',
               avatar: _foundUser!.data['avatar'] ?? '',
-              isActive: false,
+              isActive: isOnline,
               currentUserId: currentUser.$id,
               otherUserId: _foundUser!.$id,
             ),
