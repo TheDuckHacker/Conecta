@@ -123,6 +123,43 @@ class ChatService {
     }
   }
 
+  /// Chat canónico 1:1 (el más activo). Evita hilos duplicados.
+  Future<Document> resolveChat({
+    required String userId,
+    required String otherUserId,
+  }) async {
+    final existing = await findExistingChat(
+      participant1Id: userId,
+      participant2Id: otherUserId,
+    );
+    if (existing != null) return existing;
+    return createChat(
+      participant1Id: userId,
+      participant2Id: otherUserId,
+    );
+  }
+
+  /// Todos los chatIds entre dos usuarios (por si hubo duplicados).
+  Future<List<String>> chatIdsForPair(String userA, String userB) async {
+    final ids = <String>{};
+    try {
+      final all = await databases.listDocuments(
+        databaseId: AppwriteConfig.databaseId,
+        collectionId: AppwriteConfig.chatsCollectionId,
+        queries: [Query.limit(100)],
+      );
+      for (final chat in all.documents) {
+        final parts = parseParticipants(chat.data['participants']);
+        if (parts.contains(userA) && parts.contains(userB)) {
+          ids.add(chat.$id);
+        }
+      }
+    } catch (e) {
+      debugPrint('chatIdsForPair: $e');
+    }
+    return ids.toList();
+  }
+
   Future<List<Document>> getMessages(String chatId) async {
     List<Document> result = [];
     try {
@@ -152,6 +189,30 @@ class ChatService {
       }
     }
 
+    result.sort((a, b) => messageTime(a).compareTo(messageTime(b)));
+    return result;
+  }
+
+  /// Mensajes de todos los chats entre dos personas (fusiona duplicados).
+  Future<List<Document>> getMessagesForPair({
+    required String userId,
+    required String otherUserId,
+    String? primaryChatId,
+  }) async {
+    final chatIds = await chatIdsForPair(userId, otherUserId);
+    if (primaryChatId != null && primaryChatId.isNotEmpty) {
+      chatIds.add(primaryChatId);
+    }
+    if (chatIds.isEmpty) return [];
+
+    final byId = <String, Document>{};
+    for (final id in chatIds.toSet()) {
+      final msgs = await getMessages(id);
+      for (final m in msgs) {
+        byId[m.$id] = m;
+      }
+    }
+    final result = byId.values.toList();
     result.sort((a, b) => messageTime(a).compareTo(messageTime(b)));
     return result;
   }

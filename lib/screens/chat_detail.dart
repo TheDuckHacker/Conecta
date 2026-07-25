@@ -40,7 +40,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _isSending = false;
   bool _isOnline = false;
   String _chatId = '';
+  final Set<String> _pairChatIds = {};
   RealtimeSubscription? _subscription;
+  StreamSubscription? _realtimeListen;
   Timer? _pollTimer;
 
   static const _accent = Color(0xff37C8F2);
@@ -57,21 +59,32 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _initChat() async {
-    if (_chatId.isEmpty && widget.otherUserId != null) {
-      try {
-        Document? existingChat = await _chatService.findExistingChat(
-          participant1Id: widget.currentUserId,
-          participant2Id: widget.otherUserId!,
+    final otherId = widget.otherUserId;
+    try {
+      // Siempre usar el chat canónico de la pareja (evita hilos duplicados).
+      if (otherId != null && otherId.isNotEmpty) {
+        final chat = await _chatService.resolveChat(
+          userId: widget.currentUserId,
+          otherUserId: otherId,
         );
-        existingChat ??= await _chatService.createChat(
-          participant1Id: widget.currentUserId,
-          participant2Id: widget.otherUserId!,
+        _chatId = chat.$id;
+        final pairIds = await _chatService.chatIdsForPair(
+          widget.currentUserId,
+          otherId,
         );
-        _chatId = existingChat.$id;
-      } catch (e) {
-        debugPrint('Error creating chat: $e');
+        _pairChatIds
+          ..clear()
+          ..addAll(pairIds)
+          ..add(_chatId);
+      } else if (_chatId.isNotEmpty) {
+        _pairChatIds
+          ..clear()
+          ..add(_chatId);
       }
+    } catch (e) {
+      debugPrint('Error resolving chat: $e');
     }
+
     await Future.wait([
       _loadMessages(scroll: true),
       _refreshOtherUserStatus(),
@@ -98,6 +111,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _realtimeListen?.cancel();
     _subscription?.close();
     _messageController.dispose();
     _scrollController.dispose();
@@ -113,14 +127,30 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _loadMessages({bool scroll = false}) async {
-    if (_chatId.isEmpty) {
+    if (_chatId.isEmpty && _pairChatIds.isEmpty) {
       if (mounted) setState(() => _isLoading = false);
       return;
     }
     try {
-      final loaded = await _chatService.getMessages(_chatId);
-      _messages = List<Document>.from(loaded);
-      _sortMessages();
+      List<Document> loaded;
+      final otherId = widget.otherUserId;
+      if (otherId != null && otherId.isNotEmpty) {
+        loaded = await _chatService.getMessagesForPair(
+          userId: widget.currentUserId,
+          otherUserId: otherId,
+          primaryChatId: _chatId,
+        );
+      } else {
+        loaded = await _chatService.getMessages(_chatId);
+      }
+
+      // Evitar parpadeo si no cambió nada
+      final same = loaded.length == _messages.length &&
+          loaded.every((m) => _messages.any((e) => e.$id == m.$id));
+      if (!same) {
+        _messages = List<Document>.from(loaded);
+        _sortMessages();
+      }
     } catch (e) {
       debugPrint('Error loading messages: $e');
     }
@@ -130,24 +160,62 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
+  bool _isRelevantChatId(String? chatId) {
+    if (chatId == null || chatId.isEmpty) return false;
+    if (chatId == _chatId) return true;
+    return _pairChatIds.contains(chatId);
+  }
+
   void _subscribeToMessages() {
+    _realtimeListen?.cancel();
     _subscription?.close();
     _pollTimer?.cancel();
-    if (_chatId.isEmpty) return;
+    if (_chatId.isEmpty && _pairChatIds.isEmpty) return;
 
-    _subscription = _chatService.subscribeToMessages(_chatId);
-    _subscription!.stream.listen(
-      (event) {
-        final payload = event.payload;
-        if (payload['chatId']?.toString() == _chatId && mounted) {
-          _loadMessages(scroll: true);
-        }
-      },
-      onError: (e) => debugPrint('Realtime error: $e'),
-      cancelOnError: false,
-    );
+    try {
+      _subscription = _chatService.subscribeToMessages(_chatId);
+      _realtimeListen = _subscription!.stream.listen(
+        (event) {
+          if (!mounted) return;
+          final payload = event.payload;
+          if (payload.isEmpty) return;
 
-    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+          final eventChatId = payload['chatId']?.toString();
+          if (!_isRelevantChatId(eventChatId)) return;
+
+          final events = event.events;
+          final isCreate = events.any((e) => e.contains('.create'));
+          final isDelete = events.any((e) => e.contains('.delete'));
+
+          if (isDelete) {
+            final id = payload['\$id']?.toString();
+            if (id != null) {
+              setState(() => _messages.removeWhere((m) => m.$id == id));
+            }
+            return;
+          }
+
+          // Crear/actualizar: recargar para mantener orden y datos del servidor
+          if (isCreate || events.any((e) => e.contains('.update'))) {
+            _loadMessages(scroll: true);
+          } else {
+            // Algunos SDKs no mandan el sufijo; si es del chat, recargar
+            _loadMessages(scroll: true);
+          }
+        },
+        onError: (e) {
+          debugPrint('Realtime error: $e');
+          // Si cae el websocket, el poll sigue cubriendo
+        },
+        onDone: () => debugPrint('Realtime cerrado'),
+        cancelOnError: false,
+      );
+    } catch (e) {
+      debugPrint('No se pudo suscribir a realtime: $e');
+    }
+
+    // Respaldo rápido: Appwrite realtime a veces no llega en emulador/red
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
         _loadMessages();
         _refreshOtherUserStatus();
