@@ -69,7 +69,7 @@ app.post('/ai/compose', async (req, res) => {
     signs.join(' → ');
 
   try {
-    const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+    const model = 'gemini-flash-latest';
     const url =
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
     const r = await fetch(url, {
