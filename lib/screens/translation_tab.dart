@@ -206,6 +206,31 @@ class _TranslationTabState extends State<TranslationTab> {
                           color: Colors.white),
                     ),
                   ),
+                  // Subtítulos encima de la cámara
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 16,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.78),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xff27C7D9)),
+                      ),
+                      child: Text(
+                        _detected,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          height: 1.25,
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -231,11 +256,11 @@ class _TranslationTabState extends State<TranslationTab> {
             children: [
               const Row(
                 children: [
-                  Icon(Icons.translate_rounded,
+                  Icon(Icons.closed_caption_rounded,
                       color: Color(0xff27C7D9), size: 18),
                   SizedBox(width: 8),
                   Text(
-                    'TRADUCCIÓN DETECTADA',
+                    'SUBTÍTULOS / TRADUCCIÓN',
                     style: TextStyle(
                       color: Color(0xffA8B8C0),
                       fontSize: 12,
@@ -250,7 +275,7 @@ class _TranslationTabState extends State<TranslationTab> {
                 _detected,
                 style: const TextStyle(
                   color: Color(0xff121B35),
-                  fontSize: 20,
+                  fontSize: 22,
                   fontWeight: FontWeight.bold,
                 ),
               ),

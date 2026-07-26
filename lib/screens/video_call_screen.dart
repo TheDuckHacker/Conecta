@@ -55,8 +55,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   CallUserRole _role = CallUserRole.deaf;
   String _localCaption = '';
   String _remoteCaption = '';
+  String _displayCaption = ''; // subtítulo grande en pantalla
   String _statusHint = 'Iniciando cámara...';
   bool _handsVisible = false;
+  Timer? _captionHoldTimer;
 
   String _roomId = '';
   StreamSubscription? _captionListen;
@@ -195,12 +197,35 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     }
   }
 
+  void _showOnScreenCaption(String text, {bool fromRemote = false}) {
+    final clean = text.trim();
+    if (clean.isEmpty || !mounted) return;
+    setState(() {
+      if (fromRemote) {
+        _remoteCaption = clean;
+      } else {
+        _localCaption = clean;
+      }
+      // Siempre pintar en el banner grande
+      _displayCaption = clean;
+    });
+  }
+
   Future<void> _initRoom() async {
     final me = widget.currentUserId;
     final other = widget.otherUserId;
     if (me == null || other == null || me.isEmpty || other.isEmpty) {
-      // Sala local de prueba (un solo dispositivo / sin otro usuario)
-      _roomId = 'solo-$me';
+      _roomId = 'solo-${me ?? 'local'}';
+      try {
+        await _calls.connect(
+          roomId: _roomId,
+          userId: me ?? 'local',
+          role: _role == CallUserRole.deaf ? 'deaf' : 'hearing',
+        );
+        if (mounted) setState(() => _wsConnected = true);
+      } catch (e) {
+        debugPrint('solo room: $e');
+      }
       return;
     }
 
@@ -223,10 +248,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         if (sender == me) return;
         final caption = (msg['text'] ?? '').toString().trim();
         if (caption.isEmpty || !mounted) return;
-        setState(() {
-          _remoteCaption = caption;
-          _statusHint = 'En vivo (Render)';
-        });
+        _showOnScreenCaption(caption, fromRemote: true);
+        setState(() => _statusHint = 'Subtítulo en vivo');
         if (_role == CallUserRole.hearing) {
           _voice.speak(caption);
         }
@@ -236,7 +259,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         if (!mounted) return;
         final type = msg['type']?.toString();
         if (type == 'peer_joined') {
-          setState(() => _statusHint = 'Conectado con el otro usuario');
+          setState(() => _statusHint = 'Conectado · subtítulos activos');
         } else if (type == 'peer_left') {
           setState(() => _statusHint = 'El otro usuario salió');
         } else if (type == 'joined') {
@@ -244,8 +267,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           final n = peers is List ? peers.length : 0;
           setState(() {
             _statusHint = n > 0
-                ? 'Sala lista · $n en llamada'
-                : 'Esperando al otro usuario...';
+                ? 'Sala lista · subtítulos en pantalla'
+                : 'Esperando al otro · subtítulos listos';
           });
         }
       });
@@ -263,10 +286,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     bool speak = false,
   }) async {
     if (!mounted) return;
-    setState(() => _localCaption = text);
+    _showOnScreenCaption(text, fromRemote: false);
 
-    final me = widget.currentUserId;
-    if (me != null && _roomId.isNotEmpty) {
+    final me = widget.currentUserId ?? 'local';
+    if (_roomId.isNotEmpty) {
       await _calls.sendCaption(
         roomId: _roomId,
         senderId: me,
@@ -283,14 +306,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     await _voice.startListening(
       onResult: (text, isFinal) async {
         if (!mounted || text.trim().isEmpty) return;
-        setState(() => _localCaption = text);
+        // Mostrar en pantalla en tiempo real (parciales también)
+        _showOnScreenCaption(text, fromRemote: false);
         if (isFinal) {
           await _emitLocalCaption(text, role: 'speech', speak: false);
         }
       },
     );
     if (mounted) {
-      setState(() => _statusHint = 'Escuchando tu voz...');
+      setState(() => _statusHint = 'Habla: verás subtítulos aquí');
     }
   }
 
@@ -318,6 +342,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _captionHoldTimer?.cancel();
     _captionListen?.cancel();
     _peerListen?.cancel();
     _calls.dispose();
@@ -448,29 +473,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             ),
           ),
 
-          // Subtítulos
+          // SUBTÍTULOS GRANDES (siempre visibles en pantalla)
           Positioned(
-            left: 16,
-            right: 16,
-            bottom: 150,
-            child: Column(
-              children: [
-                if (_remoteCaption.isNotEmpty)
-                  _captionBubble(
-                    label: 'Ellos',
-                    text: _remoteCaption,
-                    color: const Color(0xff37C8F2),
-                  ),
-                if (_localCaption.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  _captionBubble(
-                    label: 'Tú',
-                    text: _localCaption,
-                    color: Colors.white,
-                  ),
-                ],
-              ],
-            ),
+            left: 12,
+            right: 12,
+            bottom: _role == CallUserRole.deaf ? 160 : 120,
+            child: _buildLiveSubtitles(),
           ),
 
           // Frases rápidas (modo sordo)
@@ -478,7 +486,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             Positioned(
               left: 0,
               right: 0,
-              bottom: 100,
+              bottom: 108,
               child: SizedBox(
                 height: 40,
                 child: ListView.separated(
@@ -581,43 +589,106 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     );
   }
 
-  Widget _captionBubble({
-    required String label,
-    required String text,
-    required Color color,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.5)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.6,
+  Widget _buildLiveSubtitles() {
+    final hasText = _displayCaption.trim().isNotEmpty;
+    final placeholder = _role == CallUserRole.deaf
+        ? 'Los subtítulos aparecerán aquí al hacer señas…'
+        : 'Los subtítulos aparecerán aquí al hablar…';
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Banda principal estilo TV / YouTube
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.82),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: hasText
+                  ? const Color(0xff37C8F2)
+                  : Colors.white24,
+              width: 1.5,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.45),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            text,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              height: 1.25,
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.closed_caption_rounded,
+                    color: hasText
+                        ? const Color(0xff37C8F2)
+                        : Colors.white54,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    hasText ? 'SUBTÍTULOS' : 'ESPERANDO SUBTÍTULOS',
+                    style: TextStyle(
+                      color: hasText
+                          ? const Color(0xff37C8F2)
+                          : Colors.white54,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                hasText ? _displayCaption : placeholder,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: hasText ? Colors.white : Colors.white60,
+                  fontSize: hasText ? 26 : 16,
+                  fontWeight: FontWeight.w800,
+                  height: 1.3,
+                  shadows: const [
+                    Shadow(
+                      color: Colors.black,
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_remoteCaption.isNotEmpty &&
+            _localCaption.isNotEmpty &&
+            _remoteCaption != _localCaption) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              'Tú: $_localCaption',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
-      ),
+      ],
     );
   }
 
