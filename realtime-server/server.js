@@ -228,16 +228,17 @@ app.post('/tts', async (req, res) => {
 const helpSessions = new Map();
 
 const HELP_SYSTEM = [
-  'Eres el asistente de ayuda de Conecta LSB (app de Lengua de Señas Boliviana).',
-  'Responde en español, claro, corto y amable (máx. 6 líneas).',
-  'Ayudas con: Traducción (cámara), Academia LSB (pasos de señas), chats, videollamada y voz.',
-  'Señas que la cámara entiende (simplificadas):',
-  '- Hola: mano BIEN ARRIBA junto a la cabeza, vaivén lado a lado.',
-  '- ¿Cómo estás?: mano cerca de la cara, movimiento corto → la app arma la frase.',
-  '- Yo: mano en el pecho quieta. Bien: pecho quieto. Sí: pecho arriba/abajo. No: pecho lado a lado.',
-  '- Gracias: cerca de la barbilla quieta. Adiós: media altura con vaivén suave.',
-  'Si preguntan por Zavu/WhatsApp: pueden continuar la ayuda por WhatsApp desde el botón en la app.',
-  'Si no sabes algo de la app, dilo y sugiere Academia → Cómo empezar.',
+  'Eres el asistente de Conecta LSB (Lengua de Señas Boliviana).',
+  'Responde en español, claro y breve (máx. 6 líneas).',
+  'Las señas de la app coinciden con la guía visual (6 paneles):',
+  '- HOLA: mano abierta BIEN ARRIBA junto a la cabeza + vaivén lado a lado.',
+  '- ¿CÓMO ESTÁS?: mano cerca de barbilla/mejilla + movimiento corto lado a lado.',
+  '- YO: índice apuntando al pecho, quieto.',
+  '- BIEN: mano al pecho, palma al frente, quieta.',
+  '- SÍ: pecho + movimiento arriba/abajo (pulgar arriba).',
+  '- NO: mano plana al pecho + vaivén lado a lado.',
+  'Ayudas con Traducción, Academia, videollamada y esas señas.',
+  'Si no sabes, sugiere Academia → curso y mirar la imagen de la guía.',
 ].join('\n');
 
 function helpLocalReply(message) {
@@ -251,8 +252,8 @@ function helpLocalReply(message) {
   if (m.includes('academia') || m.includes('aprender') || m.includes('práctica')) {
     return 'En Academia LSB: 1) Toca “Cómo empezar”. 2) Elige un curso. 3) Lee los pasos numerados. 4) Toca “Practicar con cámara”.';
   }
-  if (m.includes('whatsapp') || m.includes('zavu')) {
-    return 'Puedes seguir chateando con el agente por WhatsApp (Zavu) con el botón “Continuar en WhatsApp” en esta pantalla, si el servidor tiene Zavu configurado.';
+  if (m.includes('whatsapp') || m.includes('zavu') || m.includes('sender')) {
+    return 'Conecta es tu app propia. La ayuda está dentro: Inicio → Agente de ayuda, o el botón Ayuda en la videollamada. No hace falta WhatsApp ni Zavu.';
   }
   if (m.includes('traduc') || m.includes('cámara') || m.includes('camara')) {
     return 'En Traducción: permite la cámara, buena luz, pecho visible. Usa el botón del libro para ver la guía de señas. Las palabras se arman en frase (IA en servidor o local).';

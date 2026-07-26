@@ -5,7 +5,6 @@ import 'package:conecta_lsb/services/chat_service.dart';
 import 'package:conecta_lsb/services/contact_service.dart';
 import 'package:conecta_lsb/screens/chat_detail.dart';
 import 'package:conecta_lsb/screens/add_contact_screen.dart';
-import 'package:conecta_lsb/screens/help_agent_screen.dart';
 
 class HomeTab extends StatefulWidget {
   final VoidCallback onStartCamera;
@@ -95,9 +94,6 @@ class _HomeTabState extends State<HomeTab> {
 
                 // TRANSLATION CARD
                 _buildTranslationCard(),
-
-                const SizedBox(height: 14),
-                _buildHelpAgentCard(),
 
                 const SizedBox(height: 30),
 
@@ -216,60 +212,6 @@ class _HomeTabState extends State<HomeTab> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildHelpAgentCard() {
-    return Material(
-      color: const Color(0xff121B35),
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const HelpAgentScreen()),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: const Color(0xff27C7D9),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(Icons.smart_toy_rounded, color: Colors.white),
-              ),
-              const SizedBox(width: 14),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Agente de ayuda',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Preguntas sobre señas + WhatsApp (Zavu)',
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.white70),
-            ],
-          ),
-        ),
       ),
     );
   }

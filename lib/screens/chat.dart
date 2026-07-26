@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:conecta_lsb/screens/academy_tab.dart';
 import 'package:conecta_lsb/screens/chats_tab.dart';
+import 'package:conecta_lsb/screens/help_agent_screen.dart';
 import 'package:conecta_lsb/screens/home_tab.dart';
 import 'package:conecta_lsb/screens/profile.dart';
 import 'package:conecta_lsb/screens/settings_tab.dart';
@@ -138,6 +139,20 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Asistente',
+            icon: const Icon(
+              Icons.smart_toy_outlined,
+              color: Colors.white,
+              size: 26,
+            ),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const HelpAgentScreen()),
+              );
+            },
+          ),
+          IconButton(
             icon: Badge(
               isLabelVisible: _pendingCall != null,
               child: const Icon(
@@ -178,7 +193,7 @@ class _ChatScreenState extends State<ChatScreen> {
               }
             },
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
         ],
       ),
       body: Container(

@@ -203,8 +203,8 @@ class _SettingsTabState extends State<SettingsTab> {
           ),
           _item(
             icon: Icons.smart_toy_rounded,
-            title: 'Agente de ayuda (Zavu)',
-            subtitle: 'Chat in-app y WhatsApp',
+            title: 'Asistente Conecta',
+            subtitle: 'Señas de la guía · Academia y llamadas',
             onTap: () {
               Navigator.push(
                 context,

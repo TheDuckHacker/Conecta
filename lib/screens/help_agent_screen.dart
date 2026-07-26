@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:conecta_lsb/services/help_agent_service.dart';
 
 class _Bubble {
@@ -14,7 +13,7 @@ class _Bubble {
   });
 }
 
-/// Chat de ayuda in-app + puente a WhatsApp vía Zavu.
+/// Asistente de Conecta LSB (chat en la app).
 class HelpAgentScreen extends StatefulWidget {
   const HelpAgentScreen({super.key});
 
@@ -28,7 +27,6 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
   final _scroll = ScrollController();
   final List<_Bubble> _messages = [];
   bool _busy = false;
-  ZavuStatus _zavu = const ZavuStatus(configured: false);
 
   static const _suggestions = [
     '¿Cómo hago la seña Hola?',
@@ -43,21 +41,13 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
     _messages.add(
       const _Bubble(
         text:
-            'Hola, soy el agente de ayuda de Conecta LSB. '
-            'Pregúntame cómo hacer señas, usar Academia o Traducción. '
-            'También puedes continuar por WhatsApp con Zavu.',
+            'Hola, soy el asistente de Conecta LSB. '
+            'Te ayudo con las señas de la guía (Hola, ¿Cómo estás?, Yo, Bien, Sí, No), '
+            'Academia, Traducción y videollamadas.',
         fromUser: false,
         source: 'conecta',
       ),
     );
-    _loadZavu();
-  }
-
-  Future<void> _loadZavu() async {
-    try {
-      final s = await _agent.zavuStatus();
-      if (mounted) setState(() => _zavu = s);
-    } catch (_) {}
   }
 
   Future<void> _send([String? preset]) async {
@@ -73,13 +63,6 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
       final out = await _agent.ask(text);
       if (!mounted) return;
       setState(() {
-        _zavu = ZavuStatus(
-          configured: out.zavuConfigured,
-          whatsappNumber: out.whatsappNumber.replaceAll(RegExp(r'\D'), ''),
-          waMe: out.whatsappNumber.isNotEmpty
-              ? 'https://wa.me/${out.whatsappNumber.replaceAll(RegExp(r'\D'), '')}'
-              : _zavu.waMe,
-        );
         _messages.add(
           _Bubble(text: out.reply, fromUser: false, source: out.source),
         );
@@ -91,9 +74,9 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
           _Bubble(
             text:
                 'No pude contactar al servidor. Revisa tu internet. '
-                'Mientras: Academia → Cómo empezar muestra los pasos de cada seña.\n($e)',
+                'Mientras: Academia → Cómo empezar muestra los pasos de cada seña.',
             fromUser: false,
-            source: 'error',
+            source: 'local',
           ),
         );
       });
@@ -112,91 +95,6 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
         curve: Curves.easeOut,
       );
     });
-  }
-
-  Future<void> _openWhatsApp() async {
-    var wa = _zavu.waMe;
-    if (wa.isEmpty && _zavu.whatsappNumber.isNotEmpty) {
-      wa = 'https://wa.me/${_zavu.whatsappNumber}';
-    }
-    if (wa.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Zavu aún no tiene número en el servidor. '
-            'Configura ZAVU_WHATSAPP_NUMBER en Render.',
-          ),
-        ),
-      );
-      return;
-    }
-    final uri = Uri.parse(
-      '$wa?text=${Uri.encodeComponent("Hola, necesito ayuda con Conecta LSB")}',
-    );
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo abrir WhatsApp')),
-      );
-    }
-  }
-
-  Future<void> _sendPhoneViaZavu() async {
-    final phoneCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Enviar por Zavu'),
-        content: TextField(
-          controller: phoneCtrl,
-          keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(
-            labelText: 'Tu WhatsApp (con código país)',
-            hintText: '+59170000000',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Enviar'),
-          ),
-        ],
-      ),
-    );
-    final to = phoneCtrl.text.trim();
-    phoneCtrl.dispose();
-    if (ok != true || to.isEmpty) return;
-
-    final helpMsgs = _messages.where((m) => !m.fromUser).toList();
-    final lastHelp =
-        helpMsgs.isNotEmpty ? helpMsgs.last.text : null;
-    final text = lastHelp ??
-        'Hola desde Conecta LSB. Escribe tu duda y el agente Zavu te ayudará.';
-
-    try {
-      final sent = await _agent.sendViaZavu(to: to, text: text);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            sent
-                ? 'Mensaje enviado por Zavu a $to'
-                : 'No se pudo enviar (¿ZAVU_API_KEY en Render?)',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error Zavu: $e')),
-      );
-    }
   }
 
   @override
@@ -218,60 +116,18 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Agente de ayuda',
+              'Asistente Conecta',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
             ),
             Text(
-              'Conecta + Zavu',
+              'Señas, Academia y llamadas',
               style: TextStyle(fontSize: 12, color: Color(0xff5A6E85)),
             ),
           ],
         ),
-        actions: [
-          IconButton(
-            tooltip: 'WhatsApp (Zavu)',
-            onPressed: _openWhatsApp,
-            icon: const Icon(Icons.chat_rounded, color: Color(0xff25D366)),
-          ),
-          IconButton(
-            tooltip: 'Enviar por API Zavu',
-            onPressed: _sendPhoneViaZavu,
-            icon: const Icon(Icons.send_to_mobile_rounded),
-          ),
-        ],
       ),
       body: Column(
         children: [
-          if (_zavu.configured || _zavu.whatsappNumber.isNotEmpty)
-            Material(
-              color: const Color(0xffE8F8EF),
-              child: ListTile(
-                dense: true,
-                leading: const Icon(Icons.check_circle, color: Color(0xff25D366)),
-                title: Text(
-                  _zavu.configured
-                      ? 'Zavu listo en el servidor'
-                      : 'WhatsApp de ayuda disponible',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                trailing: TextButton(
-                  onPressed: _openWhatsApp,
-                  child: const Text('Abrir WhatsApp'),
-                ),
-              ),
-            )
-          else
-            const Material(
-              color: Color(0xffFFF6E5),
-              child: ListTile(
-                dense: true,
-                leading: Icon(Icons.info_outline, color: Colors.orange),
-                title: Text(
-                  'Chat in-app activo. Zavu/WhatsApp se activa con ZAVU_API_KEY en Render.',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ),
-            ),
           Expanded(
             child: ListView.builder(
               controller: _scroll,
@@ -281,10 +137,10 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
                 final m = _messages[i];
                 final align =
                     m.fromUser ? Alignment.centerRight : Alignment.centerLeft;
-                final bg = m.fromUser
-                    ? const Color(0xff27C7D9)
-                    : Colors.white;
-                final fg = m.fromUser ? Colors.white : const Color(0xff121B35);
+                final bg =
+                    m.fromUser ? const Color(0xff27C7D9) : Colors.white;
+                final fg =
+                    m.fromUser ? Colors.white : const Color(0xff121B35);
                 return Align(
                   alignment: align,
                   child: Container(
@@ -307,29 +163,9 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
                         ),
                       ],
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          m.text,
-                          style: TextStyle(color: fg, height: 1.35, fontSize: 15),
-                        ),
-                        if (!m.fromUser && m.source != null) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            m.source == 'gemini'
-                                ? 'IA · servidor'
-                                : (m.source == 'conecta'
-                                    ? 'Conecta'
-                                    : m.source!),
-                            style: TextStyle(
-                              color: fg.withValues(alpha: 0.55),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ],
+                    child: Text(
+                      m.text,
+                      style: TextStyle(color: fg, height: 1.35, fontSize: 15),
                     ),
                   ),
                 );
@@ -368,7 +204,7 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
                       textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _send(),
                       decoration: InputDecoration(
-                        hintText: 'Escribe tu duda…',
+                        hintText: 'Escribe tu duda aquí…',
                         filled: true,
                         fillColor: Colors.white,
                         border: OutlineInputBorder(

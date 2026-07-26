@@ -268,8 +268,7 @@ class SignDetectionService {
         InputImageRotation.rotation90deg;
   }
 
-  /// Clasifica por gesto específico. Orden: más específico → más genérico.
-  /// "Hola" SOLO con saludo claro (mano alta + vaivén horizontal fuerte).
+  /// Clasifica según la guía visual `assets/msl/guia_senas.png`.
   SignDetectionResult? _classify(_HandPose s) {
     if (_history.length < 3) return null;
 
@@ -280,69 +279,69 @@ class SignDetectionService {
     final handHigh = s.rightHandHigh || s.leftHandHigh;
     final mid = s.rightHandMid || s.leftHandMid;
 
-    // --- Posturas estáticas / locales (antes que el saludo) ---
-
-    // Yo: mano en el pecho, poco movimiento
-    if (s.handOnChest && wave < 0.045 && nod < 0.045) {
-      return _hit('Yo', 0.86);
+    // 1) YO — panel: índice al pecho, quieto
+    if (s.handOnChest && wave < 0.04 && nod < 0.04) {
+      return _hit('Yo', 0.88);
     }
 
-    // Gracias: muñeca cerca de la cara/barbilla, sin vaivén fuerte
-    if (s.wristsNearFace && wave < 0.05 && !handHigh) {
-      return _hit('Gracias', 0.88);
+    // 2) ¿CÓMO ESTÁS? — panel: cerca de barbilla + vaivén corto
+    if (s.wristsNearFace && !handHigh && wave >= 0.028 && wave < 0.12) {
+      return _hit('Cómo', 0.86);
     }
 
-    // Cómo: cerca de la cara + movimiento corto (pregunta)
-    if (s.wristsNearFace && wave >= 0.03 && wave < 0.11) {
-      return _hit('Cómo', 0.82);
+    // 3) Gracias — cerca de cara SIN vaivén (después de Cómo)
+    if (s.wristsNearFace && wave < 0.028 && !handHigh) {
+      return _hit('Gracias', 0.84);
     }
 
-    // Comer: cerca de la boca, estable
-    if (s.wristsNearMouth && wave < 0.04 && nod < 0.05) {
+    // 4) Comer — boca
+    if (s.wristsNearMouth && wave < 0.035 && nod < 0.04) {
       return _hit('Comer', 0.8);
     }
 
-    // Por favor / Dolor: manos juntas
+    // 5) Por favor / Dolor — manos juntas
     if (s.leftOk && s.rightOk && s.handsTogether) {
       if (s.bothHandsMid) return _hit('Dolor', 0.8);
       return _hit('Por favor', 0.8);
     }
 
-    // No: a la altura del pecho, vaivén lateral claro
-    if (mid && !handHigh && wave >= 0.085 && peaks >= 1) {
-      return _hit('No', 0.86);
+    // 6) NO — panel: pecho + vaivén horizontal (flecha ↔)
+    if (mid && !handHigh && wave >= 0.07 && peaks >= 1 && nod < wave) {
+      return _hit('No', 0.88);
     }
 
-    // Sí: pecho, movimiento vertical
-    if (mid && !handHigh && nod >= 0.05 && wave < 0.055) {
-      return _hit('Sí', 0.85);
+    // 7) SÍ — panel: pecho + movimiento vertical (flecha ↑↓)
+    if (mid && !handHigh && nod >= 0.045 && wave < 0.05) {
+      return _hit('Sí', 0.86);
     }
 
-    // Bien: pecho, mano quieta
-    if (mid && !handHigh && wave < 0.035 && nod < 0.035 && !s.wristsNearFace) {
-      return _hit('Bien', 0.78);
+    // 8) BIEN — panel: pecho, palma al frente, QUIETO
+    if (mid &&
+        !handHigh &&
+        wave < 0.03 &&
+        nod < 0.03 &&
+        !s.wristsNearFace) {
+      return _hit('Bien', 0.82);
     }
 
-    // Mal: mano baja
-    if (s.handLowDominant && wave < 0.05 && nod < 0.05) {
+    // 9) Mal — mano baja
+    if (s.handLowDominant && wave < 0.045 && nod < 0.045) {
       return _hit('Mal', 0.8);
     }
 
-    // Adiós: mano media-alta + vaivén moderado (no tan alto como saludo)
-    if (handUp && !handHigh && wave >= 0.06 && wave < 0.12 && peaks >= 1) {
+    // 10) Adiós — media altura + vaivén (no tan alto como Hola)
+    if (handUp && !handHigh && wave >= 0.055 && peaks >= 1) {
       return _hit('Adiós', 0.8);
     }
 
-    // Hola: mano bien arriba + vaivén horizontal claro
-    if (handHigh && wave >= 0.055 && peaks >= 1) {
-      return _hit('Hola', 0.92);
+    // 11) HOLA — panel: mano BIEN ARRIBA + vaivén lado a lado
+    if (handHigh && wave >= 0.05 && peaks >= 1) {
+      return _hit('Hola', 0.93);
     }
-    // Hola (versión estática): mano bien arriba sostenida
-    if (handHigh && _history.length >= 6 && wave < 0.03 && nod < 0.03) {
-      return _hit('Hola', 0.72);
+    if (handHigh && _history.length >= 5 && wave >= 0.035) {
+      return _hit('Hola', 0.8);
     }
 
-    // Nada claro todavía (no forzar Hola)
     return null;
   }
 

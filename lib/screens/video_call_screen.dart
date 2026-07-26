@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/call_service.dart';
 import 'package:conecta_lsb/services/call_invite_service.dart';
+import 'package:conecta_lsb/services/help_agent_service.dart';
 import 'package:conecta_lsb/services/sign_ai_agent.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
+import 'package:conecta_lsb/services/sign_guide.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
 
@@ -486,6 +488,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                     ],
                   ),
                 ),
+                _callHelpBtn(),
+                const SizedBox(width: 8),
                 _roleChip(),
               ],
             ),
@@ -609,6 +613,213 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         ],
       ),
     );
+  }
+
+  Widget _callHelpBtn() {
+    return Material(
+      color: const Color(0xff27C7D9),
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: _openCallHelp,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.smart_toy_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 6),
+              Text(
+                'Ayuda',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openCallHelp() async {
+    final ctrl = TextEditingController();
+    String answer = '';
+    bool busy = false;
+
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xff1E293B),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModal) {
+            Future<void> ask([String? preset]) async {
+              final q = (preset ?? ctrl.text).trim();
+              if (q.isEmpty || busy) return;
+              setModal(() => busy = true);
+              try {
+                final out = await HelpAgentService.instance.ask(
+                  'Estoy en una videollamada LSB en la app Conecta. $q',
+                );
+                setModal(() {
+                  answer = out.reply;
+                  busy = false;
+                });
+              } catch (_) {
+                setModal(() {
+                  answer =
+                      'Tips rápidos en llamada:\n'
+                      '• Hola: mano bien arriba + vaivén\n'
+                      '• Cómo estás: mano cerca de la cara\n'
+                      '• Yo / Bien: pecho quieto\n'
+                      '• Usa las chips de frases rápidas abajo.';
+                  busy = false;
+                });
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 12,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Ayuda en la videollamada',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Imita las señas de la guía (mismas que Academia y Traducción).',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white60, fontSize: 13),
+                    ),
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.asset(
+                        SignGuide.asset,
+                        fit: BoxFit.contain,
+                        height: 160,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      SignGuide.liveHint,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xff37C8F2),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        '¿Cómo hago Hola?',
+                        '¿Cómo digo cómo estás?',
+                        'No me detecta las manos',
+                      ]
+                          .map(
+                            (s) => ActionChip(
+                              label:
+                                  Text(s, style: const TextStyle(fontSize: 12)),
+                              onPressed: busy ? null : () => ask(s),
+                              backgroundColor: Colors.white12,
+                              labelStyle:
+                                  const TextStyle(color: Colors.white),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: ctrl,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Escribe tu duda…',
+                        hintStyle: const TextStyle(color: Colors.white38),
+                        filled: true,
+                        fillColor: Colors.white10,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        suffixIcon: IconButton(
+                          onPressed: busy ? null : () => ask(),
+                          icon: busy
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Color(0xff37C8F2),
+                                  ),
+                                )
+                              : const Icon(Icons.send_rounded,
+                                  color: Color(0xff37C8F2)),
+                        ),
+                      ),
+                      onSubmitted: (_) => ask(),
+                    ),
+                    if (answer.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xff37C8F2)),
+                        ),
+                        child: Text(
+                          answer,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    ctrl.dispose();
   }
 
   Widget _roleChip() {

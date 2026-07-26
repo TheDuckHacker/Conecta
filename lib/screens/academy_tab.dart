@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/settings_service.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
+import 'package:conecta_lsb/services/sign_guide.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
 
 class AcademyCourse {
@@ -26,152 +27,10 @@ class AcademyCourse {
   });
 }
 
-/// Instrucciones de cómo hacer cada seña (pasos numerados).
-const Map<String, List<String>> signSteps = {
-  'Hola': [
-    'Ponte frente a la cámara (1–2 metros).',
-    'Levanta la mano abierta BIEN ARRIBA, junto a la cabeza.',
-    'Muévela de lado a lado como si saludaras (1–2 segundos).',
-    'Mantén pecho y cara visibles.',
-  ],
-  'Cómo': [
-    'Acerca la mano a tu cara (mejilla o barbilla).',
-    'Haz un movimiento corto de lado a lado.',
-    'Pon cara de pregunta (cejas un poco arriba).',
-    'La app lo leerá como: ¿Cómo estás?',
-  ],
-  'Gracias': [
-    'Lleva la mano cerca de la barbilla / cara.',
-    'Manténla quieta 1–2 segundos (sin vaivén fuerte).',
-    'Opcional: aléjala un poco hacia adelante.',
-  ],
-  'Por favor': [
-    'Junta las dos manos frente al cuerpo.',
-    'Manténlas juntas y quietas 1–2 segundos.',
-  ],
-  'Adiós': [
-    'Mano a media altura (no tan alta como Hola).',
-    'Muévela de lado a lado con un vaivén suave.',
-  ],
-  'Sí': [
-    'Mano a la altura del pecho.',
-    'Muévela ARRIBA y ABAJO (como asintiendo con la mano).',
-  ],
-  'No': [
-    'Mano a la altura del pecho.',
-    'Muévela de LADO a LADO (vaivén horizontal).',
-  ],
-  'Bien': [
-    'Mano a la altura del pecho, palma al frente.',
-    'Déjala TOTAL (sin mover) 1–2 segundos.',
-  ],
-  'Mal': [
-    'Baja la mano hacia la cadera.',
-    'Manténla quieta abajo 1–2 segundos.',
-  ],
-  'Yo': [
-    'Apunta o apoya la mano en tu PECHO.',
-    'Manténla quieta ahí 1–2 segundos.',
-  ],
-  'Dolor': [
-    'Junta las dos manos a la altura del pecho.',
-    'Manténlas juntas 1–2 segundos.',
-  ],
-  'Comer': [
-    'Lleva la mano cerca de la BOCA.',
-    'Manténla quieta cerca de la boca 1–2 segundos.',
-  ],
-  'Beber': [
-    'Mano cerca de la boca (como sosteniendo un vaso).',
-    'Mantén la postura 1–2 segundos.',
-  ],
-  'Dormir': [
-    'Mano cerca de la mejilla / cara.',
-    'Manténla quieta 1–2 segundos.',
-  ],
-};
+/// Misma guía visual en Academia, Traducción y videollamada.
+Map<String, List<String>> get signSteps => SignGuide.steps;
 
-/// Texto plano (compatibilidad).
-const Map<String, String> signHowTo = {
-  'Hola':
-      '1) Levanta la mano abierta BIEN ARRIBA, junto a la cabeza.\n'
-      '2) Muévela de lado a lado como si saludaras (1–2 segundos).\n'
-      '3) Mantén el pecho y la cara visibles en cámara.',
-  'Cómo':
-      '1) Acerca la mano a la cara (mejilla o barbilla).\n'
-      '2) Haz un movimiento corto de lado a lado.\n'
-      '3) La app lo convierte en: ¿Cómo estás?',
-  'Gracias':
-      '1) Lleva la mano cerca de la barbilla / cara.\n'
-      '2) Manténla quieta 1–2 segundos (sin vaivén fuerte).\n'
-      '3) Luego puedes alejarla un poco hacia adelante.',
-  'Por favor':
-      '1) Junta las dos manos frente al cuerpo.\n'
-      '2) Manténlas juntas y quietas 1–2 segundos.',
-  'Adiós':
-      '1) Mano a media altura (no tan alta como Hola).\n'
-      '2) Muévela de lado a lado con un vaivén suave.',
-  'Sí':
-      '1) Mano a la altura del pecho.\n'
-      '2) Muévela ARRIBA y ABAJO (como asintiendo).',
-  'No':
-      '1) Mano a la altura del pecho.\n'
-      '2) Muévela de LADO a LADO (vaivén horizontal).',
-  'Bien':
-      '1) Mano a la altura del pecho, palma al frente.\n'
-      '2) Déjala TOTAL (sin mover) 1–2 segundos.',
-  'Mal':
-      '1) Baja la mano hacia la cadera.\n'
-      '2) Manténla quieta abajo 1–2 segundos.',
-  'Yo':
-      '1) Apunta o apoya la mano en tu PECHO.\n'
-      '2) Manténla quieta ahí 1–2 segundos.',
-  'Dolor':
-      '1) Junta las dos manos a la altura del pecho.\n'
-      '2) Manténlas juntas 1–2 segundos.',
-  'Comer':
-      '1) Lleva la mano cerca de la BOCA.\n'
-      '2) Manténla quieta cerca de la boca 1–2 segundos.',
-  'Beber':
-      '1) Mano cerca de la boca (como sosteniendo un vaso).\n'
-      '2) Mantén la postura 1–2 segundos.',
-  'Dormir':
-      '1) Mano cerca de la mejilla / cara.\n'
-      '2) Manténla quieta 1–2 segundos.',
-};
-
-IconData signIcon(String phrase) {
-  switch (phrase) {
-    case 'Hola':
-      return Icons.waving_hand_rounded;
-    case 'Cómo':
-      return Icons.help_rounded;
-    case 'Gracias':
-      return Icons.favorite_rounded;
-    case 'Por favor':
-    case 'Dolor':
-      return Icons.front_hand_rounded;
-    case 'Adiós':
-      return Icons.back_hand_rounded;
-    case 'Sí':
-      return Icons.check_circle_rounded;
-    case 'No':
-      return Icons.cancel_rounded;
-    case 'Bien':
-      return Icons.thumb_up_rounded;
-    case 'Mal':
-      return Icons.thumb_down_rounded;
-    case 'Yo':
-      return Icons.person_rounded;
-    case 'Comer':
-    case 'Beber':
-      return Icons.restaurant_rounded;
-    case 'Dormir':
-      return Icons.bedtime_rounded;
-    default:
-      return Icons.sign_language_rounded;
-  }
-}
+IconData signIcon(String phrase) => SignGuide.iconFor(phrase);
 
 const academyCourses = [
   AcademyCourse(
@@ -275,7 +134,7 @@ class _AcademyTabState extends State<AcademyTab> {
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: Image.asset(
-                'assets/msl/guia_senas.png',
+                        SignGuide.asset,
                 fit: BoxFit.contain,
               ),
             ),
@@ -552,13 +411,8 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
   String _feedback = 'Lee los pasos y toca “Practicar con cámara”';
 
   String get _target => widget.course.practices[_index];
-  String get _targetLabel => _target == 'Cómo' ? '¿Cómo estás?' : _target;
-  List<String> get _steps =>
-      signSteps[_target] ??
-      [
-        'Haz la seña “$_targetLabel” frente a la cámara.',
-        'Mantén pecho y manos visibles 1–2 segundos.',
-      ];
+  List<String> get _steps => SignGuide.stepsFor(_target);
+  String get _targetLabel => SignGuide.labelFor(_target);
 
   @override
   void initState() {
@@ -673,7 +527,7 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Image.asset(
-                    'assets/msl/guia_senas.png',
+                        SignGuide.asset,
                     fit: BoxFit.contain,
                   ),
                 ),
@@ -766,7 +620,7 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: Image.asset(
-                  'assets/msl/guia_senas.png',
+                        SignGuide.asset,
                   fit: BoxFit.contain,
                 ),
               ),

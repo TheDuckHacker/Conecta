@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/sign_ai_agent.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
+import 'package:conecta_lsb/services/sign_guide.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
 
@@ -158,7 +159,7 @@ class _TranslationTabState extends State<TranslationTab> {
         if (_sentence.isEmpty) {
           final h = !_handsVisible
               ? 'Buscando manos… cuerpo visible, luz buena'
-              : 'Manos OK — Hola=saludo alto | Cómo=cara | Yo=pecho | Bien=quieto';
+              : SignGuide.liveHint;
           if (_hint != h) {
             _hint = h;
             changed = true;
@@ -247,7 +248,7 @@ class _TranslationTabState extends State<TranslationTab> {
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: Image.asset(
-                'assets/msl/guia_senas.png',
+                SignGuide.asset,
                 fit: BoxFit.contain,
               ),
             ),
