@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: conecta-realtime
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: realtime-server
+    buildCommand: npm install
+    startCommand: node server.js
+    autoDeploy: true
+    healthCheckPath: /health
