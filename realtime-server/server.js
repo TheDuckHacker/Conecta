@@ -604,6 +604,27 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    // Frame de video (JPEG base64) → el otro ve la cámara en vivo
+    if (type === 'frame') {
+      const roomId = String(msg.roomId || meta.roomId || '').trim();
+      const userId = String(msg.userId || meta.userId || '').trim();
+      const data = String(msg.data || '').trim();
+      if (!roomId || !userId || !data || data.length > 120000) return;
+
+      broadcast(
+        roomId,
+        {
+          type: 'frame',
+          roomId,
+          userId,
+          data,
+          at: new Date().toISOString(),
+        },
+        userId,
+      );
+      return;
+    }
+
     if (type === 'signal') {
       // Señalización WebRTC (offer/answer/ice) hacia un peer o a toda la sala
       const roomId = String(msg.roomId || meta.roomId || '').trim();

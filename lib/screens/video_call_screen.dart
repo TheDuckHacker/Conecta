@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +13,7 @@ import 'package:conecta_lsb/services/help_agent_service.dart';
 import 'package:conecta_lsb/services/sign_ai_agent.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
 import 'package:conecta_lsb/services/sign_guide.dart';
+import 'package:conecta_lsb/services/video_frame_codec.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
 import 'package:conecta_lsb/widgets/hand_points_overlay.dart';
@@ -77,6 +80,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   StreamSubscription? _captionListen;
   StreamSubscription? _peerListen;
   StreamSubscription? _callEventListen;
+  StreamSubscription? _frameListen;
   bool _wsConnected = false;
   bool _peerConnected = false;
   bool _callRejected = false;
@@ -84,6 +88,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   Timer? _ringTimeout;
   Timer? _reRingTimer;
   int _seconds = 0;
+
+  /// Pantalla grande = el otro; PiP = yo. Tocar PiP intercambia.
+  bool _remoteIsMain = true;
+  Uint8List? _remoteJpeg;
+  int _frameSkip = 0;
+  bool _encodingFrame = false;
 
   @override
   void initState() {
@@ -182,8 +192,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   }
 
   Future<void> _onFrame(CameraImage image) async {
-    if (_processing || _isVideoOff || _role != CallUserRole.deaf) return;
-    if (_camera == null) return;
+    if (_camera == null || _isVideoOff) return;
+
+    // Video en vivo hacia el otro (JPEG liviano), aunque no sea rol sordo
+    _maybeSendVideoFrame(image);
+
+    if (_processing || _role != CallUserRole.deaf) return;
     _processing = true;
     try {
       _sign.syncOrientation(_camera);
@@ -220,6 +234,26 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     } finally {
       _processing = false;
     }
+  }
+
+  void _maybeSendVideoFrame(CameraImage image) {
+    if (!_peerConnected || _isVideoOff || _encodingFrame) return;
+    if (_roomId.isEmpty || widget.currentUserId == null) return;
+    _frameSkip = (_frameSkip + 1) % 3;
+    if (_frameSkip != 0) return;
+
+    _encodingFrame = true;
+    // Copiar planos YA (sync) antes de que el buffer de cámara se recicle
+    final fut = VideoFrameCodec.encodeJpeg(image);
+    final me = widget.currentUserId!;
+    final room = _roomId;
+    unawaited(fut.then((jpeg) {
+      _encodingFrame = false;
+      if (jpeg == null || !mounted || _isVideoOff) return;
+      _calls.sendFrame(roomId: room, senderId: me, jpegBytes: jpeg);
+    }).catchError((_) {
+      _encodingFrame = false;
+    }));
   }
 
   /// Envía y habla la frase de señas cuando el usuario deja de señar.
@@ -320,6 +354,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         } else if (type == 'peer_left') {
           setState(() {
             _peerConnected = false;
+            _remoteJpeg = null;
             _statusHint = 'El otro usuario salió';
           });
         } else if (type == 'joined') {
@@ -345,6 +380,18 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             _statusHint = 'Llamada rechazada';
           });
         }
+      });
+
+      _frameListen = _calls.frames.listen((msg) {
+        final sender = msg['userId']?.toString() ?? '';
+        if (sender == me || sender.isEmpty) return;
+        final b64 = (msg['data'] ?? '').toString();
+        if (b64.isEmpty) return;
+        try {
+          final bytes = base64Decode(b64);
+          if (!mounted) return;
+          setState(() => _remoteJpeg = bytes);
+        } catch (_) {}
       });
     } catch (e) {
       debugPrint('initRoom: $e');
@@ -441,6 +488,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     _captionListen?.cancel();
     _peerListen?.cancel();
     _callEventListen?.cancel();
+    _frameListen?.cancel();
     final me = widget.currentUserId;
     if (me != null) {
       unawaited(CallInviteService.instance.endCall(me));
@@ -466,24 +514,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (_ready && !_isVideoOff && _camera != null)
-            CameraCoverPreview(controller: _camera!)
-          else
-            Container(
-              color: const Color(0xff0F172A),
-              child: Center(
-                child: _permissionDenied
-                    ? const Text(
-                        'Activa el permiso de cámara\nen Ajustes',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.white70),
-                      )
-                    : const CircularProgressIndicator(color: Color(0xff37C8F2)),
-              ),
-            ),
+          // ——— Vista PRINCIPAL (grande) ———
+          Positioned.fill(child: _buildMainSurface()),
 
-          if (_ready && !_isVideoOff && _camera != null)
-            HandPointsOverlay(frames: _sign.points, mirror: _isFront),
+          // ——— PiP pequeña (esquina) ———
+          Positioned(
+            top: MediaQuery.paddingOf(context).top + 72,
+            right: 14,
+            child: _buildPip(),
+          ),
 
           // Gradiente inferior para leer subtítulos
           Positioned(
@@ -549,7 +588,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           Positioned(
             top: 110,
             left: 16,
-            right: 16,
+            right: 140,
             child: Row(
               children: [
                 Container(
@@ -572,12 +611,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                         size: 16,
                       ),
                       const SizedBox(width: 6),
-                      Text(
-                        _statusHint,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                      Flexible(
+                        child: Text(
+                          _statusHint,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
                     ],
@@ -661,6 +703,155 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMainSurface() {
+    if (_remoteIsMain) {
+      return _buildRemoteView(full: true);
+    }
+    return _buildLocalView(full: true);
+  }
+
+  Widget _buildPip() {
+    return GestureDetector(
+      onTap: () => setState(() => _remoteIsMain = !_remoteIsMain),
+      child: Container(
+        width: 112,
+        height: 168,
+        decoration: BoxDecoration(
+          color: const Color(0xff0F172A),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white70, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_remoteIsMain)
+              _buildLocalView(full: false)
+            else
+              _buildRemoteView(full: false),
+            Positioned(
+              left: 6,
+              bottom: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _remoteIsMain ? 'Tú' : widget.userName.split(' ').first,
+                  style: const TextStyle(color: Colors.white, fontSize: 10),
+                ),
+              ),
+            ),
+            const Positioned(
+              top: 6,
+              right: 6,
+              child: Icon(Icons.swap_horiz_rounded,
+                  color: Colors.white70, size: 16),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocalView({required bool full}) {
+    if (_permissionDenied) {
+      return _placeholder(
+        icon: Icons.videocam_off_rounded,
+        label: 'Sin permiso de cámara',
+      );
+    }
+    if (!_ready || _camera == null || _isVideoOff) {
+      return _placeholder(
+        icon: _isVideoOff ? Icons.videocam_off_rounded : Icons.person_rounded,
+        label: _isVideoOff ? 'Cámara apagada' : 'Tu cámara…',
+      );
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CameraCoverPreview(controller: _camera!),
+        if (full)
+          HandPointsOverlay(frames: _sign.points, mirror: _isFront),
+      ],
+    );
+  }
+
+  Widget _buildRemoteView({required bool full}) {
+    if (_remoteJpeg != null) {
+      return Image.memory(
+        _remoteJpeg!,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        width: double.infinity,
+        height: double.infinity,
+      );
+    }
+    return _placeholder(
+      icon: _peerConnected
+          ? Icons.videocam_rounded
+          : Icons.hourglass_top_rounded,
+      label: _peerConnected
+          ? 'Esperando video de ${widget.userName}…'
+          : (widget.isCaller
+              ? 'Llamando a ${widget.userName}…'
+              : 'Conectando…'),
+      avatarLetter: widget.userName.isNotEmpty
+          ? widget.userName[0].toUpperCase()
+          : '?',
+    );
+  }
+
+  Widget _placeholder({
+    required IconData icon,
+    required String label,
+    String? avatarLetter,
+  }) {
+    return ColoredBox(
+      color: const Color(0xff0F172A),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (avatarLetter != null)
+                CircleAvatar(
+                  radius: 36,
+                  backgroundColor: const Color(0xff37C8F2),
+                  child: Text(
+                    avatarLetter,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                )
+              else
+                Icon(icon, color: Colors.white38, size: 48),
+              const SizedBox(height: 12),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -27,6 +27,7 @@ dependencies:
   image_picker: ^1.2.2
   url_launcher: ^6.3.1
   flutter_local_notifications: ^20.1.0
+  image: ^4.8.0
 
 dependency_overrides:
   flutter_web_auth_2: ^5.0.0

@@ -57,11 +57,15 @@ class CallService {
       StreamController<Map<String, dynamic>>.broadcast();
   final _callEventController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _frameController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Map<String, dynamic>> get captions => _captionController.stream;
   Stream<Map<String, dynamic>> get peers => _peerController.stream;
   Stream<Map<String, dynamic>> get signals => _signalController.stream;
   Stream<Map<String, dynamic>> get callEvents => _callEventController.stream;
+  /// Frames JPEG del otro usuario: `{ userId, data: base64 }`.
+  Stream<Map<String, dynamic>> get frames => _frameController.stream;
 
   bool get isConnected => _channel != null;
   bool get isLobbyConnected =>
@@ -318,6 +322,9 @@ class CallService {
         case 'caption':
           _captionController.add(msg);
           break;
+        case 'frame':
+          _frameController.add(msg);
+          break;
         case 'peer_joined':
         case 'peer_left':
         case 'joined':
@@ -369,6 +376,21 @@ class CallService {
     });
   }
 
+  /// Envía un frame JPEG (bytes) al otro en la sala.
+  void sendFrame({
+    required String roomId,
+    required String senderId,
+    required Uint8List jpegBytes,
+  }) {
+    if (jpegBytes.isEmpty || jpegBytes.length > 90000) return;
+    _send({
+      'type': 'frame',
+      'roomId': roomId,
+      'userId': senderId,
+      'data': base64Encode(jpegBytes),
+    });
+  }
+
   void sendSignal({
     required String roomId,
     required String userId,
@@ -409,6 +431,7 @@ class CallService {
     await _peerController.close();
     await _signalController.close();
     await _callEventController.close();
+    await _frameController.close();
   }
 
   static String? parseCaption(String raw) => raw;
