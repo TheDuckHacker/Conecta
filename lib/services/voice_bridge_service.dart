@@ -1,30 +1,42 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'ai_config.dart';
 
-/// Voz ↔ texto para la capa accesible (oyente ↔ sordo).
-/// ElevenLabs es opcional: si hay API key se usa; si no, flutter_tts local.
+/// Voz ↔ texto. Prioriza ElevenLabs vía Render; si falla, TTS local.
 class VoiceBridgeService {
   final SpeechToText _speech = SpeechToText();
   final FlutterTts _tts = FlutterTts();
-
-  /// Pega aquí tu key de ElevenLabs si quieres voz en la nube.
-  /// Déjala vacía para usar TTS del dispositivo (gratis, offline).
-  static const String elevenLabsApiKey = String.fromEnvironment(
-    'ELEVENLABS_API_KEY',
-    defaultValue: '',
-  );
+  final AudioPlayer _player = AudioPlayer();
 
   bool _speechReady = false;
   bool _listening = false;
+  bool _speaking = false;
 
   bool get isListening => _listening;
+  bool get usingElevenLabs => AiConfig.hasElevenLabs;
 
   Future<void> init() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final eleven = prefs.getString('elevenlabs_api_key');
+      final gemini = prefs.getString('gemini_api_key') ??
+          prefs.getString('openai_api_key');
+      if (eleven != null && eleven.isNotEmpty) {
+        AiConfig.setElevenLabsKey(eleven);
+      }
+      if (gemini != null && gemini.isNotEmpty) {
+        AiConfig.setGeminiKey(gemini);
+      }
+
       _speechReady = await _speech.initialize(
         onError: (e) => debugPrint('STT error: $e'),
         onStatus: (s) {
@@ -37,8 +49,26 @@ class VoiceBridgeService {
       await _tts.setSpeechRate(0.45);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.0);
+      await _player.setReleaseMode(ReleaseMode.stop);
     } catch (e) {
       debugPrint('VoiceBridge init: $e');
+    }
+  }
+
+  Future<void> saveApiKeys({
+    String? elevenLabs,
+    String? openAi,
+    String? gemini,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (elevenLabs != null) {
+      await prefs.setString('elevenlabs_api_key', elevenLabs.trim());
+      AiConfig.setElevenLabsKey(elevenLabs.trim());
+    }
+    final g = gemini ?? openAi;
+    if (g != null) {
+      await prefs.setString('gemini_api_key', g.trim());
+      AiConfig.setGeminiKey(g.trim());
     }
   }
 
@@ -71,54 +101,112 @@ class VoiceBridgeService {
 
   Future<void> speak(String text) async {
     final clean = text.trim();
-    if (clean.isEmpty) return;
-
-    if (elevenLabsApiKey.isNotEmpty) {
-      final ok = await _speakElevenLabs(clean);
-      if (ok) return;
+    if (clean.isEmpty || _speaking) return;
+    _speaking = true;
+    try {
+      // 1) Render (ElevenLabs en el servidor)
+      if (await _speakViaRender(clean)) return;
+      // 2) ElevenLabs directo si hay key local
+      if (AiConfig.elevenLabsApiKey.isNotEmpty) {
+        if (await _speakElevenLabsDirect(clean)) return;
+      }
+      await _tts.stop();
+      await _tts.speak(clean);
+    } finally {
+      _speaking = false;
     }
-    await _tts.stop();
-    await _tts.speak(clean);
   }
 
   Future<void> stopSpeaking() async {
+    try {
+      await _player.stop();
+    } catch (_) {}
     await _tts.stop();
+    _speaking = false;
   }
 
-  Future<bool> _speakElevenLabs(String text) async {
+  Future<bool> _speakViaRender(String text) async {
     try {
-      final uri = Uri.parse(
-        'https://api.elevenlabs.io/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL',
-      );
-      final response = await http.post(
-        uri,
-        headers: {
-          'xi-api-key': elevenLabsApiKey,
-          'Content-Type': 'application/json',
-          'Accept': 'audio/mpeg',
-        },
-        body:
-            '{"text":${_jsonString(text)},"model_id":"eleven_multilingual_v2"}',
-      );
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        // Reproducir MP3 remoto requiere audioplayers; fallback a TTS local
-        // si no hay player. Por ahora usamos TTS local tras confirmar API OK.
-        debugPrint('ElevenLabs OK (${response.bodyBytes.length} bytes)');
+      final uri = Uri.parse('${AiConfig.httpBase}/tts');
+      final response = await http
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'audio/mpeg',
+            },
+            body: jsonEncode({'text': text}),
+          )
+          .timeout(const Duration(seconds: 25));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        debugPrint('Render TTS ${response.statusCode}: ${response.body}');
+        return false;
       }
-      // Siempre leemos en local para no añadir más deps ahora
-      await _tts.speak(text);
-      return true;
+      return _playMp3Bytes(response.bodyBytes);
+    } catch (e) {
+      debugPrint('Render TTS: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _speakElevenLabsDirect(String text) async {
+    try {
+      final voiceId = AiConfig.elevenLabsVoiceId;
+      final uri = Uri.parse(
+        'https://api.elevenlabs.io/v1/text-to-speech/$voiceId',
+      );
+      final response = await http
+          .post(
+            uri,
+            headers: {
+              'xi-api-key': AiConfig.elevenLabsApiKey,
+              'Content-Type': 'application/json',
+              'Accept': 'audio/mpeg',
+            },
+            body: jsonEncode({
+              'text': text,
+              'model_id': 'eleven_multilingual_v2',
+              'voice_settings': {
+                'stability': 0.45,
+                'similarity_boost': 0.8,
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        debugPrint('ElevenLabs HTTP ${response.statusCode}: ${response.body}');
+        return false;
+      }
+      return _playMp3Bytes(response.bodyBytes);
     } catch (e) {
       debugPrint('ElevenLabs: $e');
       return false;
     }
   }
 
-  String _jsonString(String s) =>
-      '"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"';
+  Future<bool> _playMp3Bytes(List<int> bytes) async {
+    final dir = await getTemporaryDirectory();
+    final file = File(
+      '${dir.path}/conecta_tts_${DateTime.now().millisecondsSinceEpoch}.mp3',
+    );
+    await file.writeAsBytes(bytes, flush: true);
+    await _player.stop();
+    await _player.play(DeviceFileSource(file.path));
+    await _player.onPlayerComplete.first.timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {},
+    );
+    try {
+      await file.delete();
+    } catch (_) {}
+    return true;
+  }
 
   Future<void> dispose() async {
     await stopListening();
-    await _tts.stop();
+    await stopSpeaking();
+    await _player.dispose();
   }
 }

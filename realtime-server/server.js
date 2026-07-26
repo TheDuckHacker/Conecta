@@ -23,22 +23,127 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/', (_req, res) => {
-  res.json({
-    ok: true,
-    service: 'conecta-realtime',
-    ws: '/ws',
-    health: '/health',
-  });
-});
-
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     rooms: rooms.size,
     clients: wss ? wss.clients.size : 0,
     uptime: process.uptime(),
+    ai: Boolean(process.env.GEMINI_API_KEY),
+    tts: Boolean(process.env.ELEVENLABS_API_KEY),
   });
+});
+
+app.get('/', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'conecta-realtime',
+    ws: '/ws',
+    health: '/health',
+    ai: '/ai/compose',
+    tts: '/tts',
+  });
+});
+
+/**
+ * Agente Gemini: señas → frase en español
+ * POST /ai/compose { "signs": ["Hola","Bien"] }
+ */
+app.post('/ai/compose', async (req, res) => {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    return res.status(503).json({ error: 'GEMINI_API_KEY no configurada' });
+  }
+
+  const signs = Array.isArray(req.body?.signs)
+    ? req.body.signs.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+  if (signs.length === 0) {
+    return res.status(400).json({ error: 'signs requerido' });
+  }
+
+  const prompt =
+    'Eres intérprete de lengua de señas hacia español latinoamericano (Bolivia). ' +
+    'Recibes tokens de señas y debes devolver SOLO una frase natural en español, ' +
+    'corta, sin comillas ni explicación.\nSeñas: ' +
+    signs.join(' → ');
+
+  try {
+    const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 120 },
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      console.error('Gemini error', r.status, data);
+      return res.status(502).json({ error: 'Gemini falló', detail: data });
+    }
+    const text =
+      data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+    const sentence = String(text).trim().replace(/^["']|["']$/g, '');
+    return res.json({
+      signs,
+      sentence: sentence || signs.join(', ') + '.',
+      source: 'gemini',
+    });
+  } catch (e) {
+    console.error('Gemini', e);
+    return res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+/**
+ * ElevenLabs TTS
+ * POST /tts { "text": "Hola" } → audio/mpeg
+ */
+app.post('/tts', async (req, res) => {
+  const key = process.env.ELEVENLABS_API_KEY;
+  if (!key) {
+    return res.status(503).json({ error: 'ELEVENLABS_API_KEY no configurada' });
+  }
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'text requerido' });
+
+  const voiceId =
+    process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL';
+
+  try {
+    const r = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': key,
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg',
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: { stability: 0.45, similarity_boost: 0.8 },
+        }),
+      },
+    );
+    if (!r.ok) {
+      const errText = await r.text();
+      console.error('ElevenLabs', r.status, errText);
+      return res.status(502).json({ error: 'ElevenLabs falló', detail: errText });
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(buf);
+  } catch (e) {
+    console.error('TTS', e);
+    return res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 /** roomId -> Map(userId -> { ws, role, joinedAt }) */
@@ -206,6 +311,58 @@ wss.on('connection', (ws) => {
         leaveRoom(meta.roomId, meta.userId);
         meta.roomId = null;
         meta.userId = null;
+      }
+      return;
+    }
+
+    // Invitación de llamada → lobby personal del destinatario
+    if (type === 'invite') {
+      const target =
+        String(msg.targetLobby || '').trim() ||
+        (msg.toUserId ? `lobby:${msg.toUserId}` : '');
+      const fromUserId = String(msg.fromUserId || msg.userId || meta.userId || '').trim();
+      const roomId = String(msg.callRoomId || msg.roomId || '').trim();
+      const fromName = String(msg.fromName || 'Contacto').trim();
+      if (!target || !fromUserId || !roomId) return;
+
+      const envelope = {
+        type: 'invite',
+        fromUserId,
+        fromName,
+        roomId,
+        toUserId: String(msg.toUserId || '').trim(),
+        at: new Date().toISOString(),
+      };
+
+      const lobby = rooms.get(target);
+      if (lobby) {
+        const raw = JSON.stringify(envelope);
+        for (const client of lobby.values()) {
+          if (client.ws.readyState === 1) client.ws.send(raw);
+        }
+      }
+      return;
+    }
+
+    if (type === 'call_response') {
+      const target =
+        String(msg.targetLobby || '').trim() ||
+        (msg.toUserId ? `lobby:${msg.toUserId}` : '');
+      if (!target) return;
+      const envelope = {
+        type: 'call_response',
+        fromUserId: String(msg.fromUserId || meta.userId || '').trim(),
+        toUserId: String(msg.toUserId || '').trim(),
+        roomId: String(msg.roomId || '').trim(),
+        accepted: !!msg.accepted,
+        at: new Date().toISOString(),
+      };
+      const lobby = rooms.get(target);
+      if (lobby) {
+        const raw = JSON.stringify(envelope);
+        for (const client of lobby.values()) {
+          if (client.ws.readyState === 1) client.ws.send(raw);
+        }
       }
       return;
     }
