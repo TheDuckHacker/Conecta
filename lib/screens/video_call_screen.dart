@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -8,11 +11,14 @@ import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/call_service.dart';
 import 'package:conecta_lsb/services/call_invite_service.dart';
 import 'package:conecta_lsb/services/help_agent_service.dart';
+import 'package:conecta_lsb/services/sign_ai_agent.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
 import 'package:conecta_lsb/services/sign_guide.dart';
+import 'package:conecta_lsb/services/video_frame_codec.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
 import 'package:conecta_lsb/services/webrtc_call_session.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
+import 'package:conecta_lsb/widgets/hand_points_overlay.dart';
 
 enum CallUserRole { deaf, hearing }
 
@@ -53,11 +59,19 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   final _calls = CallService();
 
   CameraController? _camera;
+  List<CameraDescription> _cameras = [];
   bool _isFront = true;
   bool _isMuted = false;
   bool _isVideoOff = false;
-  bool _ready = false;
   bool _permissionDenied = false;
+  bool _processing = false;
+  bool _handsVisible = false;
+  bool _encodingFrame = false;
+  int _frameSkip = 0;
+  Uint8List? _remoteJpeg;
+  StreamSubscription? _frameListen;
+  Timer? _signSpeakTimer;
+  String _lastSpokenSign = '';
 
   CallUserRole _role = CallUserRole.deaf;
   String _localCaption = '';
@@ -113,10 +127,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     await _voice.init();
     await _sign.start();
     await _initRoom();
-    await _startWebRtc();
 
-    if (_role == CallUserRole.hearing && mic.isGranted) {
-      await _startHearingMode();
+    // Modo sordo: la cámara es de ML Kit (señas). WebRTC solo audio.
+    // Modo oyente: WebRTC con video completo.
+    if (_role == CallUserRole.deaf) {
+      await _startSignCamera();
+      await _startWebRtc(enableLocalVideo: false);
+    } else {
+      await _startWebRtc(enableLocalVideo: true);
+      if (mic.isGranted) await _startHearingMode();
     }
 
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -124,7 +143,150 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     });
   }
 
-  Future<void> _startWebRtc() async {
+  Future<void> _startSignCamera() async {
+    try {
+      _cameras = await availableCameras();
+      if (_cameras.isEmpty) {
+        if (mounted) setState(() => _statusHint = 'No hay cámara disponible');
+        return;
+      }
+      final desc = _cameras.firstWhere(
+        (c) =>
+            c.lensDirection ==
+            (_isFront ? CameraLensDirection.front : CameraLensDirection.back),
+        orElse: () => _cameras.first,
+      );
+      await _openSignCamera(desc);
+    } catch (e) {
+      debugPrint('startSignCamera: $e');
+      if (mounted) {
+        setState(() => _statusHint = 'Error cámara LSB: $e');
+      }
+    }
+  }
+
+  Future<void> _openSignCamera(CameraDescription desc) async {
+    final previous = _camera;
+    final next = CameraController(
+      desc,
+      ResolutionPreset.medium,
+      enableAudio: false,
+      imageFormatGroup:
+          Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+    );
+    _camera = next;
+    try {
+      await previous?.dispose();
+    } catch (_) {}
+    await next.initialize();
+    if (!mounted || _camera != next) {
+      await next.dispose();
+      return;
+    }
+    _sign.syncOrientation(next);
+    await next.startImageStream(_onSignFrame);
+    if (!mounted) return;
+    setState(() {
+      _statusHint = 'Haz señas — detección LSB en vivo';
+    });
+  }
+
+  Future<void> _stopSignCamera() async {
+    final cam = _camera;
+    _camera = null;
+    if (cam == null) return;
+    try {
+      if (cam.value.isStreamingImages) {
+        await cam.stopImageStream();
+      }
+    } catch (_) {}
+    try {
+      await cam.dispose();
+    } catch (_) {}
+    _sign.points.value = null;
+  }
+
+  Future<void> _onSignFrame(CameraImage image) async {
+    if (_camera == null || _isVideoOff) return;
+
+    // Video hacia el otro (JPEG) cuando WebRTC no lleva cámara local
+    _maybeSendVideoFrame(image);
+
+    if (_processing || _role != CallUserRole.deaf) return;
+    _processing = true;
+    try {
+      _sign.syncOrientation(_camera);
+      final result = await _sign.processCameraImage(
+        image,
+        camera: _camera!.description,
+      );
+      if (result == null || !mounted) return;
+
+      if (result.handsVisible != _handsVisible) {
+        setState(() => _handsVisible = result.handsVisible);
+      }
+
+      if (result.phrase.isEmpty) {
+        if (result.status == 'manos' || result.status == 'cuerpo') {
+          setState(() {
+            _statusHint = result.status == 'manos'
+                ? 'Manos OK — haz la seña'
+                : 'Cuerpo OK — sube las manos';
+          });
+        } else if (!_handsVisible && _displayCaption.isEmpty) {
+          setState(() => _statusHint = SignGuide.liveHint);
+        }
+        return;
+      }
+
+      final agent =
+          await SignLanguageAiAgent.instance.ingestSign(result.phrase);
+      if (!mounted) return;
+      _showOnScreenCaption(agent.sentence);
+      setState(() {
+        _statusHint = SignGuide.labelFor(result.phrase);
+      });
+      _scheduleSignSpeak();
+    } finally {
+      _processing = false;
+    }
+  }
+
+  void _maybeSendVideoFrame(CameraImage image) {
+    if (!_peerConnected || _isVideoOff || _encodingFrame) return;
+    if (_roomId.isEmpty || widget.currentUserId == null) return;
+    // Si WebRTC ya manda video local, no hace falta JPEG
+    if (_webrtc != null && _webrtc!.enableLocalVideo) return;
+
+    _frameSkip = (_frameSkip + 1) % 3;
+    if (_frameSkip != 0) return;
+
+    _encodingFrame = true;
+    final fut = VideoFrameCodec.encodeJpeg(image);
+    final me = widget.currentUserId!;
+    final room = _roomId;
+    unawaited(fut.then((jpeg) {
+      _encodingFrame = false;
+      if (jpeg == null || !mounted || _isVideoOff) return;
+      _calls.sendFrame(roomId: room, senderId: me, jpegBytes: jpeg);
+    }).catchError((_) {
+      _encodingFrame = false;
+    }));
+  }
+
+  void _scheduleSignSpeak() {
+    _signSpeakTimer?.cancel();
+    _signSpeakTimer = Timer(const Duration(milliseconds: 850), () async {
+      final agent = await SignLanguageAiAgent.instance.flush();
+      if (!mounted) return;
+      final sentence = agent.sentence.trim();
+      if (sentence.isEmpty || sentence == _lastSpokenSign) return;
+      _lastSpokenSign = sentence;
+      unawaited(_emitLocalCaption(sentence, role: 'sign', speak: true));
+    });
+  }
+
+  Future<void> _startWebRtc({bool enableLocalVideo = true}) async {
     final me = widget.currentUserId;
     if (me == null || me.isEmpty || _roomId.isEmpty || _roomId.startsWith('solo')) {
       return;
@@ -135,19 +297,34 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         roomId: _roomId,
         localUserId: me,
         isCaller: widget.isCaller,
+        enableLocalVideo: enableLocalVideo,
       );
-      await session.start();
+      try {
+        await session.start();
+      } catch (e) {
+        unawaited(session.dispose());
+        rethrow;
+      }
+      if (!mounted) {
+        unawaited(session.dispose());
+        return;
+      }
       session.remoteReady.addListener(_onRemoteVideoReady);
+      session.localReady.addListener(_onLocalVideoReady);
       _webrtc = session;
-      if (!mounted) return;
       setState(() {
         _webrtcReady = true;
-        _ready = true;
-        _statusHint = widget.isCaller
-            ? 'Video listo · llamando a ${widget.userName}…'
-            : 'Video listo · conectando…';
+        if (!enableLocalVideo) {
+          // La cámara LSB ya está activa
+          _statusHint = _handsVisible
+              ? 'Manos OK — haz señas'
+              : 'Haz señas — detección LSB en vivo';
+        } else {
+          _statusHint = widget.isCaller
+              ? 'Video listo · llamando a ${widget.userName}…'
+              : 'Video listo · conectando…';
+        }
       });
-      // Si el otro ya estaba en la sala, negociar ya
       if (_peerConnected) {
         await session.onPeerJoined();
       }
@@ -161,7 +338,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   void _onRemoteVideoReady() {
     if (!mounted) return;
-    final ready = _webrtc?.remoteReady.value ?? false;
+    final ready = _webrtc?.canRenderRemote ?? false;
     setState(() {
       _remoteVideoReady = ready;
       if (ready) {
@@ -170,8 +347,25 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     });
   }
 
+  void _onLocalVideoReady() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   Future<void> _flipCamera() async {
     _isFront = !_isFront;
+    if (_camera != null) {
+      if (_cameras.length < 2) return;
+      final cam = _cameras.firstWhere(
+        (c) =>
+            c.lensDirection ==
+            (_isFront ? CameraLensDirection.front : CameraLensDirection.back),
+        orElse: () => _cameras.first,
+      );
+      setState(() {});
+      await _openSignCamera(cam);
+      return;
+    }
     try {
       await _webrtc?.switchCamera();
     } catch (e) {
@@ -269,6 +463,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           setState(() {
             _peerConnected = false;
             _remoteVideoReady = false;
+            _remoteJpeg = null;
             _statusHint = 'El otro usuario salió';
           });
         } else if (type == 'joined') {
@@ -297,6 +492,19 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             _statusHint = 'Llamada rechazada';
           });
         }
+      });
+
+      _frameListen = _calls.frames.listen((msg) {
+        final sender = msg['userId']?.toString() ?? '';
+        if (sender == me || sender.isEmpty) return;
+        if (_remoteVideoReady) return;
+        final b64 = (msg['data'] ?? '').toString();
+        if (b64.isEmpty) return;
+        try {
+          final bytes = base64Decode(b64);
+          if (!mounted) return;
+          setState(() => _remoteJpeg = bytes);
+        } catch (_) {}
       });
     } catch (e) {
       debugPrint('initRoom: $e');
@@ -365,13 +573,34 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   Future<void> _setRole(CallUserRole role) async {
     if (role == _role) return;
     await _voice.stopListening();
+    SignLanguageAiAgent.instance.clear();
+    _lastSpokenSign = '';
+
     setState(() {
       _role = role;
+      _handsVisible = false;
       _statusHint = role == CallUserRole.deaf
-          ? 'Haz señas frente a la cámara'
-          : 'Habla: el otro leerá subtítulos';
+          ? 'Activando detección de señas…'
+          : 'Cambiando a modo oyente…';
     });
-    if (role == CallUserRole.hearing) {
+
+    // Reiniciar medios según el rol (cámara LSB vs video WebRTC)
+    final webrtc = _webrtc;
+    _webrtc = null;
+    if (webrtc != null) {
+      webrtc.remoteReady.removeListener(_onRemoteVideoReady);
+      webrtc.localReady.removeListener(_onLocalVideoReady);
+      await webrtc.dispose();
+    }
+    _webrtcReady = false;
+    _remoteVideoReady = false;
+
+    if (role == CallUserRole.deaf) {
+      await _startSignCamera();
+      await _startWebRtc(enableLocalVideo: false);
+    } else {
+      await _stopSignCamera();
+      await _startWebRtc(enableLocalVideo: true);
       final mic = await Permission.microphone.request();
       if (mic.isGranted) await _startHearingMode();
     }
@@ -389,12 +618,18 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     _ringTimeout?.cancel();
     _reRingTimer?.cancel();
     _captionHoldTimer?.cancel();
+    _signSpeakTimer?.cancel();
     _captionListen?.cancel();
     _peerListen?.cancel();
     _callEventListen?.cancel();
-    _webrtc?.remoteReady.removeListener(_onRemoteVideoReady);
-    unawaited(_webrtc?.dispose());
+    _frameListen?.cancel();
+    final webrtc = _webrtc;
     _webrtc = null;
+    if (webrtc != null) {
+      webrtc.remoteReady.removeListener(_onRemoteVideoReady);
+      webrtc.localReady.removeListener(_onLocalVideoReady);
+      unawaited(webrtc.dispose());
+    }
     final me = widget.currentUserId;
     if (me != null) {
       unawaited(CallInviteService.instance.endCall(me));
@@ -404,10 +639,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         );
       }
     }
+    unawaited(_stopSignCamera());
     _calls.dispose();
-    _camera?.dispose();
     _sign.stop();
-    _voice.dispose();
+    SignLanguageAiAgent.instance.clear();
+    unawaited(_voice.dispose());
     super.dispose();
   }
 
@@ -452,9 +688,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
           // Header
           Positioned(
-            top: 48,
-            left: 16,
-            right: 16,
+            top: MediaQuery.paddingOf(context).top + 8,
+            left: 12,
+            right: 12,
             child: Row(
               children: [
                 Expanded(
@@ -463,9 +699,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                     children: [
                       Text(
                         name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 22,
+                          fontSize: 20,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -473,67 +711,97 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                         _callRejected
                             ? 'Rechazada'
                             : '${_fmt(_seconds)}${_wsConnected ? (_peerConnected ? ' · En llamada' : ' · Llamando...') : ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: _callRejected
                               ? Colors.redAccent
                               : const Color(0xff37C8F2),
-                          fontSize: 14,
+                          fontSize: 13,
                         ),
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 6),
                 _callHelpBtn(),
-                const SizedBox(width: 8),
-                _roleChip(),
+                const SizedBox(width: 6),
+                Flexible(child: _roleChip()),
               ],
             ),
           ),
 
           // Estado detección
           Positioned(
-            top: 110,
-            left: 16,
-            right: 140,
-            child: Row(
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _remoteVideoReady
+            top: MediaQuery.paddingOf(context).top + 64,
+            left: 12,
+            right: 130,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _role == CallUserRole.deaf
+                        ? (_handsVisible
+                            ? Icons.front_hand_rounded
+                            : Icons.search_rounded)
+                        : (_remoteVideoReady
                             ? Icons.videocam_rounded
-                            : Icons.hourglass_top_rounded,
-                        color: _remoteVideoReady
-                            ? const Color(0xff2ECC71)
-                            : Colors.white70,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          _statusHint,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
+                            : Icons.hourglass_top_rounded),
+                    color: (_role == CallUserRole.deaf
+                            ? _handsVisible
+                            : _remoteVideoReady)
+                        ? const Color(0xff2ECC71)
+                        : Colors.white70,
+                    size: 16,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _statusHint,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+
+          // Guía corta de señas (modo sordo)
+          if (_role == CallUserRole.deaf)
+            Positioned(
+              top: MediaQuery.paddingOf(context).top + 100,
+              left: 12,
+              right: 130,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xff37C8F2), width: 1),
+                ),
+                child: const Text(
+                  SignGuide.liveHint,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    height: 1.25,
+                  ),
+                ),
+              ),
+            ),
 
           // SUBTÍTULOS GRANDES (siempre visibles en pantalla)
           Positioned(
@@ -572,44 +840,47 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
           // Controles
           Positioned(
-            bottom: 28,
-            left: 0,
-            right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _btn(
-                  icon: _isMuted ? Icons.mic_off : Icons.mic,
-                  active: _isMuted,
-                  onTap: () async {
-                    setState(() => _isMuted = !_isMuted);
-                    await _webrtc?.setMicEnabled(!_isMuted);
-                    if (_isMuted) {
-                      await _voice.stopListening();
-                    } else if (_role == CallUserRole.hearing) {
-                      await _startHearingMode();
-                    }
-                  },
-                ),
-                _btn(
-                  icon: _isVideoOff ? Icons.videocam_off : Icons.videocam,
-                  active: _isVideoOff,
-                  onTap: () async {
-                    setState(() => _isVideoOff = !_isVideoOff);
-                    await _webrtc?.setCamEnabled(!_isVideoOff);
-                  },
-                ),
-                _btn(
-                  icon: Icons.cameraswitch_rounded,
-                  onTap: _flipCamera,
-                ),
-                _btn(
-                  icon: Icons.call_end_rounded,
-                  color: Colors.redAccent,
-                  size: 64,
-                  onTap: () => Navigator.pop(context),
-                ),
-              ],
+            bottom: MediaQuery.paddingOf(context).bottom + 16,
+            left: 8,
+            right: 8,
+            child: SafeArea(
+              top: false,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _btn(
+                    icon: _isMuted ? Icons.mic_off : Icons.mic,
+                    active: _isMuted,
+                    onTap: () async {
+                      setState(() => _isMuted = !_isMuted);
+                      await _webrtc?.setMicEnabled(!_isMuted);
+                      if (_isMuted) {
+                        await _voice.stopListening();
+                      } else if (_role == CallUserRole.hearing) {
+                        await _startHearingMode();
+                      }
+                    },
+                  ),
+                  _btn(
+                    icon: _isVideoOff ? Icons.videocam_off : Icons.videocam,
+                    active: _isVideoOff,
+                    onTap: () async {
+                      setState(() => _isVideoOff = !_isVideoOff);
+                      await _webrtc?.setCamEnabled(!_isVideoOff);
+                    },
+                  ),
+                  _btn(
+                    icon: Icons.cameraswitch_rounded,
+                    onTap: _flipCamera,
+                  ),
+                  _btn(
+                    icon: Icons.call_end_rounded,
+                    color: Colors.redAccent,
+                    size: 64,
+                    onTap: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -682,37 +953,69 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       return _placeholder(
         icon: Icons.videocam_off_rounded,
         label: 'Sin permiso de cámara',
+        compact: !full,
       );
     }
     if (_isVideoOff) {
       return _placeholder(
         icon: Icons.videocam_off_rounded,
         label: 'Cámara apagada',
+        compact: !full,
       );
     }
+
+    // Modo sordo: preview + puntos de manos (detección LSB)
+    if (_camera != null && _camera!.value.isInitialized) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          CameraCoverPreview(controller: _camera!),
+          if (full && _role == CallUserRole.deaf)
+            HandPointsOverlay(frames: _sign.points, mirror: _isFront),
+        ],
+      );
+    }
+
     final webrtc = _webrtc;
-    if (_webrtcReady && webrtc != null) {
+    if (_webrtcReady && webrtc != null && webrtc.canRenderLocal) {
       return RTCVideoView(
         webrtc.localRenderer,
         mirror: _isFront,
         objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+        placeholderBuilder: (_) => _placeholder(
+          icon: Icons.person_rounded,
+          label: 'Tu cámara…',
+          compact: !full,
+        ),
       );
-    }
-    if (_ready && _camera != null) {
-      return CameraCoverPreview(controller: _camera!);
     }
     return _placeholder(
       icon: Icons.person_rounded,
-      label: 'Tu cámara…',
+      label: _role == CallUserRole.deaf ? 'Abrir cámara LSB…' : 'Tu cámara…',
+      compact: !full,
     );
   }
 
   Widget _buildRemoteView({required bool full}) {
     final webrtc = _webrtc;
-    if (_remoteVideoReady && webrtc != null) {
+    if (_remoteVideoReady && webrtc != null && webrtc.canRenderRemote) {
       return RTCVideoView(
         webrtc.remoteRenderer,
         objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+        placeholderBuilder: (_) => _placeholder(
+          icon: Icons.videocam_rounded,
+          label: 'Conectando…',
+          compact: !full,
+        ),
+      );
+    }
+    if (_remoteJpeg != null) {
+      return Image.memory(
+        _remoteJpeg!,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        width: double.infinity,
+        height: double.infinity,
       );
     }
     return _placeholder(
@@ -720,13 +1023,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           ? Icons.videocam_rounded
           : Icons.hourglass_top_rounded,
       label: _peerConnected
-          ? 'Conectando video de ${widget.userName}…'
-          : (widget.isCaller
-              ? 'Llamando a ${widget.userName}…'
-              : 'Conectando…'),
-      avatarLetter: widget.userName.isNotEmpty
+          ? 'Conectando video…'
+          : (widget.isCaller ? 'Llamando…' : 'Conectando…'),
+      avatarLetter: full && widget.userName.isNotEmpty
           ? widget.userName[0].toUpperCase()
-          : '?',
+          : null,
+      compact: !full,
     );
   }
 
@@ -734,39 +1036,66 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     required IconData icon,
     required String label,
     String? avatarLetter,
+    bool compact = false,
   }) {
     return ColoredBox(
       color: const Color(0xff0F172A),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (avatarLetter != null)
-                CircleAvatar(
-                  radius: 36,
-                  backgroundColor: const Color(0xff37C8F2),
-                  child: Text(
-                    avatarLetter,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tight = compact ||
+              constraints.maxHeight < 200 ||
+              constraints.maxWidth < 160;
+          final pad = tight ? 8.0 : 16.0;
+          final avatarR = tight ? 18.0 : 36.0;
+          final iconSize = tight ? 28.0 : 48.0;
+          final fontSize = tight ? 10.0 : 14.0;
+          final gap = tight ? 6.0 : 12.0;
+
+          return Center(
+            child: Padding(
+              padding: EdgeInsets.all(pad),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: constraints.maxWidth - pad * 2,
                   ),
-                )
-              else
-                Icon(icon, color: Colors.white38, size: 48),
-              const SizedBox(height: 12),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (avatarLetter != null)
+                        CircleAvatar(
+                          radius: avatarR,
+                          backgroundColor: const Color(0xff37C8F2),
+                          child: Text(
+                            avatarLetter,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: tight ? 16 : 28,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        )
+                      else
+                        Icon(icon, color: Colors.white38, size: iconSize),
+                      SizedBox(height: gap),
+                      Text(
+                        label,
+                        textAlign: TextAlign.center,
+                        maxLines: tight ? 3 : 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: fontSize,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -999,17 +1328,19 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     return GestureDetector(
       onTap: () => _setRole(role),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
           color: selected ? const Color(0xff37C8F2) : Colors.transparent,
           borderRadius: BorderRadius.circular(24),
         ),
         child: Text(
           label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: selected ? Colors.black : Colors.white,
             fontWeight: FontWeight.bold,
-            fontSize: 12,
+            fontSize: 11,
           ),
         ),
       ),
@@ -1076,9 +1407,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
               Text(
                 hasText ? _displayCaption : placeholder,
                 textAlign: TextAlign.center,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: hasText ? Colors.white : Colors.white60,
-                  fontSize: hasText ? 26 : 16,
+                  fontSize: hasText ? 24 : 15,
                   fontWeight: FontWeight.w800,
                   height: 1.3,
                   shadows: const [

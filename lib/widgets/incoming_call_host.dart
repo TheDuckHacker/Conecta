@@ -198,6 +198,8 @@ class _IncomingCallHostState extends State<IncomingCallHost>
                 Text(
                   call.fromName,
                   textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 26,

@@ -12,12 +12,15 @@ class WebRtcCallSession {
     required this.roomId,
     required this.localUserId,
     required this.isCaller,
+    /// En modo sordo la cámara la usa ML Kit; WebRTC solo lleva audio.
+    this.enableLocalVideo = true,
   });
 
   final CallService calls;
   final String roomId;
   final String localUserId;
   final bool isCaller;
+  final bool enableLocalVideo;
 
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
@@ -31,7 +34,36 @@ class WebRtcCallSession {
   final _pendingCandidates = <RTCIceCandidate>[];
 
   final _remoteReady = ValueNotifier<bool>(false);
+  final _localReady = ValueNotifier<bool>(false);
   ValueListenable<bool> get remoteReady => _remoteReady;
+  ValueListenable<bool> get localReady => _localReady;
+
+  void _setRemoteReady(bool value) {
+    if (_disposed) return;
+    try {
+      _remoteReady.value = value;
+    } catch (_) {
+      // notifier ya liberado
+    }
+  }
+
+  void _setLocalReady(bool value) {
+    if (_disposed) return;
+    try {
+      _localReady.value = value;
+    } catch (_) {}
+  }
+
+  /// Seguro para pintar: hay textura nativa Y stream asignado.
+  bool get canRenderLocal =>
+      !_disposed &&
+      localRenderer.textureId != null &&
+      localRenderer.srcObject != null;
+
+  bool get canRenderRemote =>
+      !_disposed &&
+      remoteRenderer.textureId != null &&
+      remoteRenderer.srcObject != null;
 
   static const _iceServers = {
     'iceServers': [
@@ -47,14 +79,23 @@ class WebRtcCallSession {
 
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
-      'video': {
-        'facingMode': 'user',
-        'width': {'ideal': 640},
-        'height': {'ideal': 480},
-        'frameRate': {'ideal': 24},
-      },
+      'video': enableLocalVideo
+          ? {
+              'facingMode': 'user',
+              'width': {'ideal': 640},
+              'height': {'ideal': 480},
+              'frameRate': {'ideal': 24},
+            }
+          : false,
     });
-    localRenderer.srcObject = _localStream;
+    localRenderer.onFirstFrameRendered = () => _setLocalReady(canRenderLocal);
+    remoteRenderer.onFirstFrameRendered = () => _setRemoteReady(canRenderRemote);
+    remoteRenderer.onResize = () => _setRemoteReady(canRenderRemote);
+
+    if (enableLocalVideo) {
+      localRenderer.srcObject = _localStream;
+      _setLocalReady(canRenderLocal);
+    }
 
     _pc = await createPeerConnection(_iceServers, {
       'mandatory': {},
@@ -82,15 +123,24 @@ class WebRtcCallSession {
     };
 
     _pc!.onTrack = (RTCTrackEvent event) {
-      if (event.streams.isEmpty) return;
-      remoteRenderer.srcObject = event.streams[0];
-      _remoteReady.value = true;
+      if (_disposed || event.streams.isEmpty) return;
+      try {
+        remoteRenderer.srcObject = event.streams[0];
+        _setRemoteReady(true);
+      } catch (e) {
+        debugPrint('onTrack render: $e');
+      }
     };
 
     _pc!.onConnectionState = (RTCPeerConnectionState state) {
       debugPrint('WebRTC connection: $state');
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-        _remoteReady.value = true;
+        _setRemoteReady(canRenderRemote);
+      } else if (state ==
+              RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+        _setRemoteReady(false);
       }
     };
 
@@ -241,9 +291,18 @@ class WebRtcCallSession {
   }
 
   Future<void> dispose() async {
+    if (_disposed) return;
+    // Avisar a la UI que deje de pintar las texturas ANTES de destruirlas:
+    // si no, RTCVideoView lee textureId! ya nulo y truena.
+    _setLocalReady(false);
+    _setRemoteReady(false);
     _disposed = true;
+
     await _signalSub?.cancel();
     _signalSub = null;
+    localRenderer.onFirstFrameRendered = null;
+    remoteRenderer.onFirstFrameRendered = null;
+    remoteRenderer.onResize = null;
     try {
       await _pc?.close();
     } catch (_) {}
@@ -253,10 +312,27 @@ class WebRtcCallSession {
         await t.stop();
       } catch (_) {}
     }
-    await _localStream?.dispose();
+    try {
+      await _localStream?.dispose();
+    } catch (_) {}
     _localStream = null;
-    await localRenderer.dispose();
-    await remoteRenderer.dispose();
-    _remoteReady.dispose();
+
+    // Soltar el stream de cada renderer y dejar pasar un frame para que la UI
+    // ya no dependa de la textura.
+    try {
+      localRenderer.srcObject = null;
+    } catch (_) {}
+    try {
+      remoteRenderer.srcObject = null;
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 32));
+    try {
+      await localRenderer.dispose();
+    } catch (_) {}
+    try {
+      await remoteRenderer.dispose();
+    } catch (_) {}
+    // Los notifiers no se liberan a propósito: la pantalla puede seguir
+    // quitando listeners después de cerrar la llamada.
   }
 }

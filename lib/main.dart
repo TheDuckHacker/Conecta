@@ -12,12 +12,42 @@ void main() async {
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('FlutterError: ${details.exceptionAsString()}');
+    debugPrint('Stack: ${details.stack}');
+  };
+
+  // Un error de construcción puntual (p. ej. una textura de video que se
+  // liberó) no debe tapar la pantalla con el recuadro rojo de Flutter.
+  ErrorWidget.builder = (details) {
+    debugPrint('ErrorWidget: ${details.exceptionAsString()}');
+    debugPrint('Stack: ${details.stack}');
+    return const _SafeErrorTile();
   };
 
   await SettingsService.instance.load();
   await NotificationService.instance.init();
 
   runApp(const ConectaApp());
+}
+
+class _SafeErrorTile extends StatelessWidget {
+  const _SafeErrorTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0xff0F172A),
+      child: Center(
+        child: Padding(
+          padding: EdgeInsets.all(12),
+          child: Text(
+            'Reconectando…',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class ConectaApp extends StatelessWidget {
