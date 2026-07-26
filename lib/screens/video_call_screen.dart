@@ -7,7 +7,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/call_service.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
-import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 
 enum CallUserRole { deaf, hearing }
 
@@ -138,7 +137,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     final previous = _camera;
     _camera = CameraController(
       desc,
-      ResolutionPreset.medium,
+      ResolutionPreset.low, // más FPS = detección en tiempo real
       enableAudio: false,
       imageFormatGroup:
           Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
@@ -151,7 +150,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     setState(() {
       _ready = true;
       _statusHint = _role == CallUserRole.deaf
-          ? 'Haz señas frente a la cámara'
+          ? 'Detección LSB en vivo — haz señas'
           : 'Habla: el otro leerá subtítulos';
     });
   }
@@ -169,19 +168,14 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     await _openCamera(cam);
   }
 
-  InputImageRotation _rotation() {
-    final sensor = _camera?.description.sensorOrientation ?? 0;
-    return InputImageRotationValue.fromRawValue(sensor) ??
-        InputImageRotation.rotation0deg;
-  }
-
   Future<void> _onFrame(CameraImage image) async {
     if (_processing || _isVideoOff || _role != CallUserRole.deaf) return;
+    if (_camera == null) return;
     _processing = true;
     try {
       final result = await _sign.processCameraImage(
         image,
-        rotation: _rotation(),
+        camera: _camera!.description,
       );
       if (result == null || !mounted) return;
 
@@ -189,9 +183,20 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         setState(() => _handsVisible = result.handsVisible);
       }
 
-      if (result.phrase.isNotEmpty) {
-        await _emitLocalCaption(result.phrase, role: 'sign', speak: true);
+      // Feedback en vivo aunque no haya frase aún
+      if (result.phrase.isEmpty) {
+        if (result.status == 'manos' || result.status == 'cuerpo') {
+          setState(() {
+            _statusHint = result.status == 'manos'
+                ? 'Manos OK — haz la seña'
+                : 'Cuerpo OK — sube las manos';
+          });
+        }
+        return;
       }
+
+      // No await speak: no congelar frames
+      unawaited(_emitLocalCaption(result.phrase, role: 'sign', speak: true));
     } finally {
       _processing = false;
     }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
@@ -5,9 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
-import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 
-/// Pestaña de traducción: cámara ON + detección automática de señas LSB.
+/// Pestaña de traducción: cámara ON + detección LSB en tiempo real.
 class TranslationTab extends StatefulWidget {
   const TranslationTab({super.key});
 
@@ -26,8 +26,11 @@ class _TranslationTabState extends State<TranslationTab> {
   bool _busy = false;
   bool _denied = false;
   bool _handsVisible = false;
+  bool _bodyVisible = false;
+  String _liveStatus = 'Iniciando...';
   String _detected = 'Activa la cámara y haz una seña';
   final List<String> _sentence = [];
+  DateTime _lastSpeak = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
@@ -41,6 +44,7 @@ class _TranslationTabState extends State<TranslationTab> {
       setState(() {
         _denied = true;
         _detected = 'Permiso de cámara necesario';
+        _liveStatus = 'Sin permiso';
       });
       return;
     }
@@ -53,7 +57,10 @@ class _TranslationTabState extends State<TranslationTab> {
     try {
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
-        setState(() => _detected = 'Sin cámara');
+        setState(() {
+          _detected = 'Sin cámara';
+          _liveStatus = 'Error';
+        });
         return;
       }
       final desc = _cameras.firstWhere(
@@ -63,9 +70,10 @@ class _TranslationTabState extends State<TranslationTab> {
         orElse: () => _cameras.first,
       );
       final previous = _camera;
+      // Low = más FPS = mejor tiempo real
       _camera = CameraController(
         desc,
-        ResolutionPreset.medium,
+        ResolutionPreset.low,
         enableAudio: false,
         imageFormatGroup: Platform.isAndroid
             ? ImageFormatGroup.nv21
@@ -77,12 +85,18 @@ class _TranslationTabState extends State<TranslationTab> {
       if (mounted) {
         setState(() {
           _ready = true;
-          _detected = 'Buscando manos...';
+          _detected = 'Buscando cuerpo y manos...';
+          _liveStatus = 'EN VIVO';
         });
       }
     } catch (e) {
       debugPrint('TranslationTab camera: $e');
-      if (mounted) setState(() => _detected = 'Error de cámara');
+      if (mounted) {
+        setState(() {
+          _detected = 'Error de cámara';
+          _liveStatus = 'Error';
+        });
+      }
     }
   }
 
@@ -94,36 +108,59 @@ class _TranslationTabState extends State<TranslationTab> {
   }
 
   Future<void> _onFrame(CameraImage image) async {
-    if (_busy || !_ready) return;
+    if (_busy || !_ready || _camera == null) return;
     _busy = true;
     try {
-      final sensor = _camera?.description.sensorOrientation ?? 0;
-      final rotation = InputImageRotationValue.fromRawValue(sensor) ??
-          InputImageRotation.rotation0deg;
       final result = await _sign.processCameraImage(
         image,
-        rotation: rotation,
+        camera: _camera!.description,
       );
       if (result == null || !mounted) return;
 
-      if (result.handsVisible != _handsVisible) {
-        setState(() {
-          _handsVisible = result.handsVisible;
-          if (_handsVisible && _detected == 'Buscando manos...') {
-            _detected = 'Mano detectada — haz la seña';
-          }
-        });
+      final statusLabel = switch (result.status) {
+        'manos' => 'Manos detectadas — haz la seña',
+        'cuerpo' => 'Cuerpo OK — sube las manos',
+        'seña' => 'Seña detectada',
+        'error_formato' => 'Ajustando cámara...',
+        _ => 'Buscando en tiempo real...',
+      };
+
+      var changed = false;
+      if (result.handsVisible != _handsVisible ||
+          result.bodyVisible != _bodyVisible ||
+          _liveStatus != 'EN VIVO') {
+        _handsVisible = result.handsVisible;
+        _bodyVisible = result.bodyVisible;
+        _liveStatus = 'EN VIVO';
+        changed = true;
       }
 
-      if (result.phrase.isNotEmpty) {
-        setState(() {
-          if (_sentence.isEmpty || _sentence.last != result.phrase) {
-            _sentence.add(result.phrase);
-            if (_sentence.length > 8) _sentence.removeAt(0);
-          }
-          _detected = _sentence.join(' ');
-        });
-        await _voice.speak(result.phrase);
+      if (result.phrase.isEmpty) {
+        // Actualizar hint en vivo aunque no haya frase aún
+        if (_detected.startsWith('Buscando') ||
+            _detected.startsWith('Cuerpo') ||
+            _detected.startsWith('Manos') ||
+            _detected.startsWith('Ajustando') ||
+            _detected == 'Activa la cámara y haz una seña') {
+          _detected = statusLabel;
+          changed = true;
+        }
+        if (changed && mounted) setState(() {});
+        return;
+      }
+
+      if (_sentence.isEmpty || _sentence.last != result.phrase) {
+        _sentence.add(result.phrase);
+        if (_sentence.length > 8) _sentence.removeAt(0);
+      }
+      _detected = _sentence.join(' ');
+      if (mounted) setState(() {});
+
+      // TTS sin bloquear el pipeline de frames
+      final now = DateTime.now();
+      if (now.difference(_lastSpeak) > const Duration(milliseconds: 1200)) {
+        _lastSpeak = now;
+        unawaited(_voice.speak(result.phrase));
       }
     } finally {
       _busy = false;
@@ -177,7 +214,9 @@ class _TranslationTabState extends State<TranslationTab> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.85),
+                        color: _handsVisible
+                            ? const Color(0xff2ECC71).withValues(alpha: 0.9)
+                            : Colors.red.withValues(alpha: 0.85),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Row(
@@ -186,7 +225,9 @@ class _TranslationTabState extends State<TranslationTab> {
                               radius: 4, backgroundColor: Colors.white),
                           const SizedBox(width: 6),
                           Text(
-                            _handsVisible ? 'LSB ACTIVO' : 'REC LSB',
+                            _handsVisible
+                                ? 'LSB EN VIVO'
+                                : (_bodyVisible ? 'DETECTANDO' : _liveStatus),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 12,
@@ -206,7 +247,6 @@ class _TranslationTabState extends State<TranslationTab> {
                           color: Colors.white),
                     ),
                   ),
-                  // Subtítulos encima de la cámara
                   Positioned(
                     left: 12,
                     right: 12,
@@ -215,19 +255,33 @@ class _TranslationTabState extends State<TranslationTab> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.78),
+                        color: Colors.black.withValues(alpha: 0.82),
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: const Color(0xff27C7D9)),
                       ),
-                      child: Text(
-                        _detected,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          height: 1.25,
-                        ),
+                      child: Column(
+                        children: [
+                          const Text(
+                            'SUBTÍTULOS EN TIEMPO REAL',
+                            style: TextStyle(
+                              color: Color(0xff27C7D9),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _detected,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              height: 1.25,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -260,7 +314,7 @@ class _TranslationTabState extends State<TranslationTab> {
                       color: Color(0xff27C7D9), size: 18),
                   SizedBox(width: 8),
                   Text(
-                    'SUBTÍTULOS / TRADUCCIÓN',
+                    'TEXTO DETECTADO',
                     style: TextStyle(
                       color: Color(0xffA8B8C0),
                       fontSize: 12,
@@ -303,7 +357,7 @@ class _TranslationTabState extends State<TranslationTab> {
                   OutlinedButton(
                     onPressed: () => setState(() {
                       _sentence.clear();
-                      _detected = 'Buscando manos...';
+                      _detected = 'Buscando cuerpo y manos...';
                     }),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xff27C7D9),
