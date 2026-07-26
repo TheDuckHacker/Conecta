@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:appwrite/appwrite.dart' show RealtimeSubscription;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -60,8 +59,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   bool _handsVisible = false;
 
   String _roomId = '';
-  RealtimeSubscription? _captionSub;
   StreamSubscription? _captionListen;
+  StreamSubscription? _peerListen;
+  bool _wsConnected = false;
   Timer? _timer;
   int _seconds = 0;
 
@@ -198,7 +198,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   Future<void> _initRoom() async {
     final me = widget.currentUserId;
     final other = widget.otherUserId;
-    if (me == null || other == null || me.isEmpty || other.isEmpty) return;
+    if (me == null || other == null || me.isEmpty || other.isEmpty) {
+      // Sala local de prueba (un solo dispositivo / sin otro usuario)
+      _roomId = 'solo-$me';
+      return;
+    }
 
     try {
       final room = await _calls.createOrJoinRoom(
@@ -206,24 +210,50 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         otherUserId: other,
       );
       _roomId = room.$id;
-      _captionSub = _calls.subscribeCaptions(_roomId);
-      _captionListen = _captionSub!.stream.listen((event) {
-        final payload = event.payload;
-        if (payload['chatId']?.toString() != _roomId) return;
-        final sender = payload['senderId']?.toString() ?? '';
+
+      await _calls.connect(
+        roomId: _roomId,
+        userId: me,
+        role: _role == CallUserRole.deaf ? 'deaf' : 'hearing',
+      );
+      if (mounted) setState(() => _wsConnected = true);
+
+      _captionListen = _calls.captions.listen((msg) {
+        final sender = msg['userId']?.toString() ?? '';
         if (sender == me) return;
-        final raw = payload['text']?.toString() ?? '';
-        final caption = CallService.parseCaption(raw);
-        if (caption == null || caption.isEmpty) return;
-        if (!mounted) return;
-        setState(() => _remoteCaption = caption);
-        // Si soy oyente y llega seña, leer en voz alta
+        final caption = (msg['text'] ?? '').toString().trim();
+        if (caption.isEmpty || !mounted) return;
+        setState(() {
+          _remoteCaption = caption;
+          _statusHint = 'En vivo (Render)';
+        });
         if (_role == CallUserRole.hearing) {
           _voice.speak(caption);
         }
       });
+
+      _peerListen = _calls.peers.listen((msg) {
+        if (!mounted) return;
+        final type = msg['type']?.toString();
+        if (type == 'peer_joined') {
+          setState(() => _statusHint = 'Conectado con el otro usuario');
+        } else if (type == 'peer_left') {
+          setState(() => _statusHint = 'El otro usuario salió');
+        } else if (type == 'joined') {
+          final peers = msg['peers'];
+          final n = peers is List ? peers.length : 0;
+          setState(() {
+            _statusHint = n > 0
+                ? 'Sala lista · $n en llamada'
+                : 'Esperando al otro usuario...';
+          });
+        }
+      });
     } catch (e) {
       debugPrint('initRoom: $e');
+      if (mounted) {
+        setState(() => _statusHint = 'Sin Render aún — reintentando...');
+      }
     }
   }
 
@@ -245,8 +275,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       );
     }
     if (speak && _role == CallUserRole.deaf) {
-      // El oyente del otro lado también recibe por realtime;
-      // localmente opcional para pruebas en un solo dispositivo.
       await _voice.speak(text);
     }
   }
@@ -291,7 +319,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   void dispose() {
     _timer?.cancel();
     _captionListen?.cancel();
-    _captionSub?.close();
+    _peerListen?.cancel();
+    _calls.dispose();
     _camera?.dispose();
     _sign.stop();
     _voice.dispose();
@@ -363,7 +392,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                         ),
                       ),
                       Text(
-                        _fmt(_seconds),
+                        '${_fmt(_seconds)}${_wsConnected ? ' · En vivo' : ''}',
                         style: const TextStyle(
                           color: Color(0xff37C8F2),
                           fontSize: 14,

@@ -1,0 +1,19 @@
+{
+  "name": "conecta-realtime",
+  "version": "1.0.0",
+  "description": "Servidor realtime Conecta LSB: salas, subtítulos y señalización WebRTC",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "uuid": "^11.0.5",
+    "ws": "^8.18.0"
+  }
+}
