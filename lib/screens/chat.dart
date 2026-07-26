@@ -1,7 +1,8 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:conecta_lsb/screens/home_tab.dart';
 import 'package:conecta_lsb/screens/chats_tab.dart';
 import 'package:conecta_lsb/screens/profile.dart';
+import 'package:conecta_lsb/screens/translation_tab.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -13,7 +14,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   int _currentIndex = 0;
-  // Lazy: no crear todas las pestañas al inicio (evita colgar el logo/splash).
+  // Lazy: no crear todas las pestaÃ±as al inicio (evita colgar el logo/splash).
   final Map<int, Widget> _pageCache = {};
 
   Widget _pageFor(int index) {
@@ -202,263 +203,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-// ==========================================
-// ADDITIONAL HIGH-FIDELITY SIMULATOR TABS
-// ==========================================
 
-class TranslationTab extends StatefulWidget {
-  const TranslationTab({super.key});
-
-  @override
-  State<TranslationTab> createState() => _TranslationTabState();
-}
-
-class _TranslationTabState extends State<TranslationTab> with SingleTickerProviderStateMixin {
-  late AnimationController _scannerController;
-  String _detectedText = "Espere...";
-  int _currentStep = 0;
-
-  final List<String> _simulatedOutputs = [
-    "Espere...",
-    "Buscando manos...",
-    "Gesto detectado: H-O-L-A",
-    "Hola",
-    "Gesto detectado: C-O-M-O",
-    "Cómo",
-    "Gesto detectado: E-S-T-A-S",
-    "Estás",
-    "Hola, ¿cómo estás?",
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _scannerController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
-
-    _simulateDetection();
-  }
-
-  void _simulateDetection() async {
-    for (int i = 0; i < _simulatedOutputs.length; i++) {
-      if (!mounted) return;
-      await Future.delayed(Duration(seconds: i == 0 ? 1 : 2));
-      if (!mounted) return;
-      setState(() {
-        _currentStep = i;
-        _detectedText = _simulatedOutputs[i];
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _scannerController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: Colors.transparent,
-      child: Column(
-        children: [
-          // Viewfinder Container
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: Stack(
-                  children: [
-                    // Camera Placeholder Image
-                    Container(
-                      color: const Color(0xff121B35),
-                      width: double.infinity,
-                      height: double.infinity,
-                      child: Center(
-                        child: Icon(
-                          Icons.front_hand_rounded,
-                          size: 100,
-                          color: Colors.white.withValues(alpha: 0.1),
-                        ),
-                      ),
-                    ),
-                    // Camera Silhouette Overlay
-                    Center(
-                      child: Container(
-                        width: 220,
-                        height: 220,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.white24, width: 2),
-                          borderRadius: BorderRadius.circular(110),
-                        ),
-                      ),
-                    ),
-                    // Scanning line animation
-                    AnimatedBuilder(
-                      animation: _scannerController,
-                      builder: (context, child) {
-                        return Positioned(
-                          top: MediaQuery.of(context).size.height * 0.45 * _scannerController.value,
-                          left: 0,
-                          right: 0,
-                          child: Container(
-                            height: 2,
-                            decoration: const BoxDecoration(
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Color(0xff27C7D9),
-                                  blurRadius: 10,
-                                  spreadRadius: 2,
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    // Top controls overlay
-                    Positioned(
-                      top: 16,
-                      left: 16,
-                      right: 16,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withValues(alpha: 0.8),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Row(
-                              children: [
-                                CircleAvatar(radius: 4, backgroundColor: Colors.white),
-                                SizedBox(width: 6),
-                                Text(
-                                  "REC LSB",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.black26,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: IconButton(
-                              icon: const Icon(Icons.flip_camera_ios_rounded, color: Colors.white),
-                              onPressed: () {},
-                            ),
-                          )
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // Translated Text Output Card
-          Container(
-            width: double.infinity,
-            margin: const EdgeInsets.only(left: 24, right: 24, bottom: 24),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-              border: Border.all(color: Colors.grey.shade200),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.translate_rounded, color: Color(0xff27C7D9), size: 18),
-                    SizedBox(width: 8),
-                    Text(
-                      "TRADUCCIÓN DETECTADA",
-                      style: TextStyle(
-                        color: Color(0xffA8B8C0),
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  _detectedText,
-                  style: TextStyle(
-                    color: _currentStep >= 2 ? const Color(0xff121B35) : const Color(0xffA8B8C0),
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          // Copy text or TTS
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("Copiado al portapapeles: '¡Hola, ¿cómo estás!'"),
-                              backgroundColor: Color(0xff27C7D9),
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff27C7D9),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        icon: const Icon(Icons.copy_rounded, size: 18),
-                        label: const Text("Copiar Texto"),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xff27C7D9),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.volume_up_rounded, color: Colors.white),
-                        onPressed: () {
-                          // TTS speaking simulated
-                        },
-                      ),
-                    )
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class AcademyTab extends StatelessWidget {
   const AcademyTab({super.key});
@@ -467,22 +212,22 @@ class AcademyTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final courses = [
       {
-        'title': 'Alfabeto Dactilológico LSB',
-        'desc': 'Aprende las 27 letras del abecedario en lengua de señas.',
+        'title': 'Alfabeto DactilolÃ³gico LSB',
+        'desc': 'Aprende las 27 letras del abecedario en lengua de seÃ±as.',
         'progress': 0.85,
-        'level': 'Básico',
+        'level': 'BÃ¡sico',
         'icon': Icons.abc_rounded,
       },
       {
         'title': 'Saludos y Presentaciones',
-        'desc': 'Cómo presentarte y saludar formal e informalmente.',
+        'desc': 'CÃ³mo presentarte y saludar formal e informalmente.',
         'progress': 0.40,
-        'level': 'Básico',
+        'level': 'BÃ¡sico',
         'icon': Icons.waving_hand_rounded,
       },
       {
-        'title': 'Conversación y Vocabulario Diario',
-        'desc': 'Expresiones cotidianas, días, colores y familia.',
+        'title': 'ConversaciÃ³n y Vocabulario Diario',
+        'desc': 'Expresiones cotidianas, dÃ­as, colores y familia.',
         'progress': 0.0,
         'level': 'Intermedio',
         'icon': Icons.forum_rounded,
@@ -507,7 +252,7 @@ class AcademyTab extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               const Text(
-                "Domina la Lengua de Señas Boliviana paso a paso.",
+                "Domina la Lengua de SeÃ±as Boliviana paso a paso.",
                 style: TextStyle(
                   fontSize: 15,
                   color: Color(0xff5A6E85),
@@ -754,7 +499,7 @@ class _SettingsTabState extends State<SettingsTab> {
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                _userStatus == 'online' ? 'En línea' : 'Desconectado',
+                                _userStatus == 'online' ? 'En lÃ­nea' : 'Desconectado',
                                 style: TextStyle(
                                   color: _userStatus == 'online' ? const Color(0xff2ECC71) : Colors.grey,
                                   fontSize: 11,
@@ -777,7 +522,7 @@ class _SettingsTabState extends State<SettingsTab> {
             _buildSettingsItem(
               icon: Icons.person_outline_rounded,
               title: "Mi Perfil",
-              subtitle: "Editar nombre, foto y más",
+              subtitle: "Editar nombre, foto y mÃ¡s",
               onTap: () {
                 Navigator.push(
                   context,
@@ -787,10 +532,10 @@ class _SettingsTabState extends State<SettingsTab> {
             ),
 
             const SizedBox(height: 20),
-            _buildSectionHeader("AJUSTES DE TRADUCCIÓN"),
+            _buildSectionHeader("AJUSTES DE TRADUCCIÃ“N"),
             _buildSettingsItem(
               icon: Icons.subtitles_rounded,
-              title: "Subtítulos automáticos",
+              title: "SubtÃ­tulos automÃ¡ticos",
               trailing: Switch(value: true, onChanged: (_) {}, activeThumbColor: const Color(0xff37C8F2), activeTrackColor: const Color(0xff37C8F2).withValues(alpha: 0.3)),
             ),
             _buildSettingsItem(
@@ -816,7 +561,7 @@ class _SettingsTabState extends State<SettingsTab> {
             _buildSettingsItem(
               icon: Icons.language_rounded,
               title: "Idioma de la interfaz",
-              subtitle: "Español",
+              subtitle: "EspaÃ±ol",
               onTap: () {},
             ),
 
@@ -845,7 +590,7 @@ class _SettingsTabState extends State<SettingsTab> {
               ),
               icon: const Icon(Icons.logout_rounded),
               label: const Text(
-                "Cerrar Sesión",
+                "Cerrar SesiÃ³n",
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ),

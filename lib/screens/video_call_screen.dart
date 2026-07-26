@@ -1,16 +1,38 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:appwrite/appwrite.dart' show RealtimeSubscription;
+import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:conecta_lsb/services/call_service.dart';
+import 'package:conecta_lsb/services/sign_detection_service.dart';
+import 'package:conecta_lsb/services/voice_bridge_service.dart';
+import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
+
+enum CallUserRole { deaf, hearing }
+
+/// Videollamada accesible LSB:
+/// - Cámara real
+/// - Persona sorda: señas → texto (+ voz para el oyente)
+/// - Persona oyente: voz → subtítulos para que el sordo lea
+/// - Subtítulos sincronizados por Appwrite Realtime
 class VideoCallScreen extends StatefulWidget {
   final String userName;
   final String userAvatar;
   final bool isVideoCall;
+  final String? currentUserId;
+  final String? otherUserId;
+  final CallUserRole initialRole;
 
   const VideoCallScreen({
     super.key,
     required this.userName,
     required this.userAvatar,
     this.isVideoCall = true,
+    this.currentUserId,
+    this.otherUserId,
+    this.initialRole = CallUserRole.deaf,
   });
 
   @override
@@ -18,47 +40,262 @@ class VideoCallScreen extends StatefulWidget {
 }
 
 class _VideoCallScreenState extends State<VideoCallScreen> {
+  final _sign = SignDetectionService();
+  final _voice = VoiceBridgeService();
+  final _calls = CallService();
+
+  CameraController? _camera;
+  List<CameraDescription> _cameras = [];
+  bool _isFront = true;
   bool _isMuted = false;
   bool _isVideoOff = false;
-  bool _isFrontCamera = true;
-  bool _isConnected = false;
-  int _callDurationSeconds = 0;
+  bool _ready = false;
+  bool _permissionDenied = false;
+  bool _processing = false;
+
+  CallUserRole _role = CallUserRole.deaf;
+  String _localCaption = '';
+  String _remoteCaption = '';
+  String _statusHint = 'Iniciando cámara...';
+  bool _handsVisible = false;
+
+  String _roomId = '';
+  RealtimeSubscription? _captionSub;
+  StreamSubscription? _captionListen;
   Timer? _timer;
+  int _seconds = 0;
+
+  static const _quickPhrases = [
+    'Hola',
+    '¿Cómo estás?',
+    'Bien',
+    'Gracias',
+    'Por favor',
+    'Sí',
+    'No',
+    'No entiendo',
+    'Repite por favor',
+    'Adiós',
+  ];
 
   @override
   void initState() {
     super.initState();
-    // Simular conexión a los 2 segundos
-    Future.delayed(const Duration(seconds: 2), () {
+    _role = widget.initialRole;
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    final cam = await Permission.camera.request();
+    final mic = await Permission.microphone.request();
+    if (!cam.isGranted) {
       if (mounted) {
         setState(() {
-          _isConnected = true;
+          _permissionDenied = true;
+          _statusHint = 'Permiso de cámara denegado';
         });
-        _startTimer();
       }
+      return;
+    }
+
+    await _voice.init();
+    await _sign.start();
+    await _initCamera();
+    await _initRoom();
+
+    if (_role == CallUserRole.hearing && mic.isGranted) {
+      await _startHearingMode();
+    }
+
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _seconds++);
     });
   }
 
-  void _startTimer() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() {
-          _callDurationSeconds++;
-        });
+  Future<void> _initCamera() async {
+    try {
+      _cameras = await availableCameras();
+      if (_cameras.isEmpty) {
+        setState(() => _statusHint = 'No hay cámara disponible');
+        return;
       }
+      final cam = _cameras.firstWhere(
+        (c) =>
+            c.lensDirection ==
+            (_isFront ? CameraLensDirection.front : CameraLensDirection.back),
+        orElse: () => _cameras.first,
+      );
+      await _openCamera(cam);
+    } catch (e) {
+      debugPrint('initCamera: $e');
+      if (mounted) setState(() => _statusHint = 'Error al abrir cámara');
+    }
+  }
+
+  Future<void> _openCamera(CameraDescription desc) async {
+    final previous = _camera;
+    _camera = CameraController(
+      desc,
+      ResolutionPreset.medium,
+      enableAudio: false,
+      imageFormatGroup:
+          Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+    );
+    await previous?.dispose();
+    await _camera!.initialize();
+    if (!mounted) return;
+
+    await _camera!.startImageStream(_onFrame);
+    setState(() {
+      _ready = true;
+      _statusHint = _role == CallUserRole.deaf
+          ? 'Haz señas frente a la cámara'
+          : 'Habla: el otro leerá subtítulos';
     });
+  }
+
+  Future<void> _flipCamera() async {
+    if (_cameras.length < 2) return;
+    _isFront = !_isFront;
+    final cam = _cameras.firstWhere(
+      (c) =>
+          c.lensDirection ==
+          (_isFront ? CameraLensDirection.front : CameraLensDirection.back),
+      orElse: () => _cameras.first,
+    );
+    setState(() => _ready = false);
+    await _openCamera(cam);
+  }
+
+  InputImageRotation _rotation() {
+    final sensor = _camera?.description.sensorOrientation ?? 0;
+    return InputImageRotationValue.fromRawValue(sensor) ??
+        InputImageRotation.rotation0deg;
+  }
+
+  Future<void> _onFrame(CameraImage image) async {
+    if (_processing || _isVideoOff || _role != CallUserRole.deaf) return;
+    _processing = true;
+    try {
+      final result = await _sign.processCameraImage(
+        image,
+        rotation: _rotation(),
+      );
+      if (result == null || !mounted) return;
+
+      if (result.handsVisible != _handsVisible) {
+        setState(() => _handsVisible = result.handsVisible);
+      }
+
+      if (result.phrase.isNotEmpty) {
+        await _emitLocalCaption(result.phrase, role: 'sign', speak: true);
+      }
+    } finally {
+      _processing = false;
+    }
+  }
+
+  Future<void> _initRoom() async {
+    final me = widget.currentUserId;
+    final other = widget.otherUserId;
+    if (me == null || other == null || me.isEmpty || other.isEmpty) return;
+
+    try {
+      final room = await _calls.createOrJoinRoom(
+        currentUserId: me,
+        otherUserId: other,
+      );
+      _roomId = room.$id;
+      _captionSub = _calls.subscribeCaptions(_roomId);
+      _captionListen = _captionSub!.stream.listen((event) {
+        final payload = event.payload;
+        if (payload['chatId']?.toString() != _roomId) return;
+        final sender = payload['senderId']?.toString() ?? '';
+        if (sender == me) return;
+        final raw = payload['text']?.toString() ?? '';
+        final caption = CallService.parseCaption(raw);
+        if (caption == null || caption.isEmpty) return;
+        if (!mounted) return;
+        setState(() => _remoteCaption = caption);
+        // Si soy oyente y llega seña, leer en voz alta
+        if (_role == CallUserRole.hearing) {
+          _voice.speak(caption);
+        }
+      });
+    } catch (e) {
+      debugPrint('initRoom: $e');
+    }
+  }
+
+  Future<void> _emitLocalCaption(
+    String text, {
+    required String role,
+    bool speak = false,
+  }) async {
+    if (!mounted) return;
+    setState(() => _localCaption = text);
+
+    final me = widget.currentUserId;
+    if (me != null && _roomId.isNotEmpty) {
+      await _calls.sendCaption(
+        roomId: _roomId,
+        senderId: me,
+        text: text,
+        role: role,
+      );
+    }
+    if (speak && _role == CallUserRole.deaf) {
+      // El oyente del otro lado también recibe por realtime;
+      // localmente opcional para pruebas en un solo dispositivo.
+      await _voice.speak(text);
+    }
+  }
+
+  Future<void> _startHearingMode() async {
+    await _voice.startListening(
+      onResult: (text, isFinal) async {
+        if (!mounted || text.trim().isEmpty) return;
+        setState(() => _localCaption = text);
+        if (isFinal) {
+          await _emitLocalCaption(text, role: 'speech', speak: false);
+        }
+      },
+    );
+    if (mounted) {
+      setState(() => _statusHint = 'Escuchando tu voz...');
+    }
+  }
+
+  Future<void> _setRole(CallUserRole role) async {
+    if (role == _role) return;
+    await _voice.stopListening();
+    setState(() {
+      _role = role;
+      _statusHint = role == CallUserRole.deaf
+          ? 'Haz señas frente a la cámara'
+          : 'Habla: el otro leerá subtítulos';
+    });
+    if (role == CallUserRole.hearing) {
+      final mic = await Permission.microphone.request();
+      if (mic.isGranted) await _startHearingMode();
+    }
+  }
+
+  String _fmt(int s) {
+    final m = (s ~/ 60).toString().padLeft(2, '0');
+    final sec = (s % 60).toString().padLeft(2, '0');
+    return '$m:$sec';
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _captionListen?.cancel();
+    _captionSub?.close();
+    _camera?.dispose();
+    _sign.stop();
+    _voice.dispose();
     super.dispose();
-  }
-
-  String _formatDuration(int seconds) {
-    final mins = (seconds ~/ 60).toString().padLeft(2, '0');
-    final secs = (seconds % 60).toString().padLeft(2, '0');
-    return '$mins:$secs';
   }
 
   @override
@@ -68,224 +305,205 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     return Scaffold(
       backgroundColor: const Color(0xff0F172A),
       body: Stack(
+        fit: StackFit.expand,
         children: [
-          // 1. Fondo de video remoto
-          Positioned.fill(
-            child: _isConnected && widget.isVideoCall && !_isVideoOff
-                ? Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Color(0xff1E293B), Color(0xff0F172A)],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircleAvatar(
-                          radius: 65,
-                          backgroundColor: const Color(0xff37C8F2).withValues(alpha: 0.2),
-                          backgroundImage: widget.userAvatar.isNotEmpty
-                              ? NetworkImage(widget.userAvatar)
-                              : null,
-                          child: widget.userAvatar.isEmpty
-                              ? Text(
-                                  name[0].toUpperCase(),
-                                  style: const TextStyle(
-                                    fontSize: 48,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xff37C8F2),
-                                  ),
-                                )
-                              : null,
-                        ),
-                        const SizedBox(height: 20),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.4),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.videocam_rounded,
-                                  color: Color(0xff37C8F2), size: 18),
-                              SizedBox(width: 8),
-                              Text(
-                                "Videollamada activa",
-                                style: TextStyle(
-                                    color: Colors.white, fontSize: 13),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : Container(
-                    color: const Color(0xff0F172A),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircleAvatar(
-                            radius: 60,
-                            backgroundColor: const Color(0xff334155),
-                            backgroundImage: widget.userAvatar.isNotEmpty
-                                ? NetworkImage(widget.userAvatar)
-                                : null,
-                            child: widget.userAvatar.isEmpty
-                                ? Text(
-                                    name[0].toUpperCase(),
-                                    style: const TextStyle(
-                                      fontSize: 40,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-          ),
+          if (_ready && !_isVideoOff && _camera != null)
+            CameraPreview(_camera!)
+          else
+            Container(
+              color: const Color(0xff0F172A),
+              child: Center(
+                child: _permissionDenied
+                    ? const Text(
+                        'Activa el permiso de cámara\nen Ajustes',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white70),
+                      )
+                    : const CircularProgressIndicator(color: Color(0xff37C8F2)),
+              ),
+            ),
 
-          // 2. Previsualización de cámara propia (Esquina superior derecha)
-          if (widget.isVideoCall && !_isVideoOff)
-            Positioned(
-              top: 50,
-              right: 20,
-              child: Container(
-                width: 110,
-                height: 160,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.8),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                      color: const Color(0xff37C8F2).withValues(alpha: 0.6), width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
+          // Gradiente inferior para leer subtítulos
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 280,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.85),
                   ],
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: Stack(
+              ),
+            ),
+          ),
+
+          // Header
+          Positioned(
+            top: 48,
+            left: 16,
+            right: 16,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        color: const Color(0xff1E293B),
-                        child: const Center(
-                          child: Icon(Icons.person,
-                              color: Colors.white54, size: 40),
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      Positioned(
-                        bottom: 6,
-                        left: 6,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.6),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Text(
-                            "Tú",
-                            style: TextStyle(color: Colors.white, fontSize: 10),
-                          ),
+                      Text(
+                        _fmt(_seconds),
+                        style: const TextStyle(
+                          color: Color(0xff37C8F2),
+                          fontSize: 14,
                         ),
                       ),
                     ],
                   ),
                 ),
-              ),
+                _roleChip(),
+              ],
             ),
+          ),
 
-          // 3. Encabezado con Nombre y Duración
+          // Estado detección
           Positioned(
-            top: 50,
-            left: 20,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            top: 110,
+            left: 16,
+            right: 16,
+            child: Row(
               children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _isConnected
-                      ? _formatDuration(_callDurationSeconds)
-                      : (widget.isVideoCall
-                          ? 'Iniciando videollamada...'
-                          : 'Llamando...'),
-                  style: TextStyle(
-                    color: _isConnected
-                        ? const Color(0xff37C8F2)
-                        : Colors.white70,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _handsVisible
+                            ? Icons.front_hand_rounded
+                            : Icons.search_rounded,
+                        color: _handsVisible
+                            ? const Color(0xff2ECC71)
+                            : Colors.white70,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _statusHint,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
 
-          // 4. Barra de Controles Inferior
+          // Subtítulos
           Positioned(
-            bottom: 40,
+            left: 16,
+            right: 16,
+            bottom: 150,
+            child: Column(
+              children: [
+                if (_remoteCaption.isNotEmpty)
+                  _captionBubble(
+                    label: 'Ellos',
+                    text: _remoteCaption,
+                    color: const Color(0xff37C8F2),
+                  ),
+                if (_localCaption.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  _captionBubble(
+                    label: 'Tú',
+                    text: _localCaption,
+                    color: Colors.white,
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          // Frases rápidas (modo sordo)
+          if (_role == CallUserRole.deaf)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 100,
+              child: SizedBox(
+                height: 40,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: _quickPhrases.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) {
+                    final p = _quickPhrases[i];
+                    return ActionChip(
+                      label: Text(p),
+                      backgroundColor: Colors.white.withValues(alpha: 0.15),
+                      labelStyle: const TextStyle(color: Colors.white),
+                      onPressed: () =>
+                          _emitLocalCaption(p, role: 'typed', speak: true),
+                    );
+                  },
+                ),
+              ),
+            ),
+
+          // Controles
+          Positioned(
+            bottom: 28,
             left: 0,
             right: 0,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                // Mute Mic
-                _buildControlButton(
-                  icon: _isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
-                  color: _isMuted ? Colors.white : Colors.white24,
-                  iconColor: _isMuted ? Colors.black : Colors.white,
-                  onTap: () => setState(() => _isMuted = !_isMuted),
+                _btn(
+                  icon: _isMuted ? Icons.mic_off : Icons.mic,
+                  active: _isMuted,
+                  onTap: () async {
+                    setState(() => _isMuted = !_isMuted);
+                    if (_isMuted) {
+                      await _voice.stopListening();
+                    } else if (_role == CallUserRole.hearing) {
+                      await _startHearingMode();
+                    }
+                  },
                 ),
-
-                // Toggle Video
-                if (widget.isVideoCall)
-                  _buildControlButton(
-                    icon: _isVideoOff
-                        ? Icons.videocam_off_rounded
-                        : Icons.videocam_rounded,
-                    color: _isVideoOff ? Colors.white : Colors.white24,
-                    iconColor: _isVideoOff ? Colors.black : Colors.white,
-                    onTap: () => setState(() => _isVideoOff = !_isVideoOff),
-                  ),
-
-                // Switch Camera
-                if (widget.isVideoCall)
-                  _buildControlButton(
-                    icon: Icons.cameraswitch_rounded,
-                    color: Colors.white24,
-                    iconColor: Colors.white,
-                    onTap: () =>
-                        setState(() => _isFrontCamera = !_isFrontCamera),
-                  ),
-
-                // End Call
-                _buildControlButton(
+                _btn(
+                  icon: _isVideoOff ? Icons.videocam_off : Icons.videocam,
+                  active: _isVideoOff,
+                  onTap: () => setState(() => _isVideoOff = !_isVideoOff),
+                ),
+                _btn(
+                  icon: Icons.cameraswitch_rounded,
+                  onTap: _flipCamera,
+                ),
+                _btn(
                   icon: Icons.call_end_rounded,
                   color: Colors.redAccent,
-                  iconColor: Colors.white,
                   size: 64,
-                  iconSize: 30,
                   onTap: () => Navigator.pop(context),
                 ),
               ],
@@ -296,13 +514,90 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     );
   }
 
-  Widget _buildControlButton({
-    required IconData icon,
+  Widget _roleChip() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black45,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _roleBtn('Sordo', CallUserRole.deaf),
+          _roleBtn('Oyente', CallUserRole.hearing),
+        ],
+      ),
+    );
+  }
+
+  Widget _roleBtn(String label, CallUserRole role) {
+    final selected = _role == role;
+    return GestureDetector(
+      onTap: () => _setRole(role),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xff37C8F2) : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.black : Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _captionBubble({
+    required String label,
+    required String text,
     required Color color,
-    required Color iconColor,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              height: 1.25,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _btn({
+    required IconData icon,
     required VoidCallback onTap,
+    bool active = false,
+    Color? color,
     double size = 52,
-    double iconSize = 24,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -310,17 +605,16 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: color,
+          color: color ?? (active ? Colors.white : Colors.white24),
           shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
         ),
-        child: Icon(icon, color: iconColor, size: iconSize),
+        child: Icon(
+          icon,
+          color: color != null
+              ? Colors.white
+              : (active ? Colors.black : Colors.white),
+          size: 24,
+        ),
       ),
     );
   }

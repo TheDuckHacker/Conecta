@@ -361,6 +361,69 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _startVideoCall() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  '¿Quién eres en esta llamada?',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Sordo: señas → texto/voz\nOyente: voz → subtítulos para leer',
+                  style: TextStyle(color: Colors.black54),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xff37C8F2),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _openCall(CallUserRole.deaf);
+                  },
+                  child: const Text('Soy sordo / uso señas'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xff37C8F2),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _openCall(CallUserRole.hearing);
+                  },
+                  child: const Text('Soy oyente / hablo'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openCall(CallUserRole role) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -368,6 +431,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           userName: widget.name,
           userAvatar: widget.avatar,
           isVideoCall: true,
+          currentUserId: widget.currentUserId,
+          otherUserId: widget.otherUserId,
+          initialRole: role,
         ),
       ),
     );

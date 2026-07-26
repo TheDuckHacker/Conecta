@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Conecta necesita la cámara para videollamadas y detectar lengua de señas LSB.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Conecta necesita el micrófono para traducir voz a texto en videollamadas accesibles.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Conecta usa reconocimiento de voz para que personas sordas puedan leer lo que se dice.</string>
 </dict>
 </plist>
