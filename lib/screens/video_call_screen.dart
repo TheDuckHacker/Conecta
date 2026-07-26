@@ -1,22 +1,18 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/call_service.dart';
 import 'package:conecta_lsb/services/call_invite_service.dart';
 import 'package:conecta_lsb/services/help_agent_service.dart';
-import 'package:conecta_lsb/services/sign_ai_agent.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
 import 'package:conecta_lsb/services/sign_guide.dart';
-import 'package:conecta_lsb/services/video_frame_codec.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
+import 'package:conecta_lsb/services/webrtc_call_session.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
-import 'package:conecta_lsb/widgets/hand_points_overlay.dart';
 
 enum CallUserRole { deaf, hearing }
 
@@ -57,30 +53,24 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   final _calls = CallService();
 
   CameraController? _camera;
-  List<CameraDescription> _cameras = [];
   bool _isFront = true;
   bool _isMuted = false;
   bool _isVideoOff = false;
   bool _ready = false;
   bool _permissionDenied = false;
-  bool _processing = false;
 
   CallUserRole _role = CallUserRole.deaf;
   String _localCaption = '';
   String _remoteCaption = '';
-  String _displayCaption = ''; // subtítulo grande en pantalla
+  String _displayCaption = '';
   String _statusHint = 'Iniciando cámara...';
-  bool _handsVisible = false;
   Timer? _captionHoldTimer;
-  Timer? _signSpeakTimer;
-  String _lastSpokenSign = '';
 
   String _roomId = '';
   String _myName = 'Contacto';
   StreamSubscription? _captionListen;
   StreamSubscription? _peerListen;
   StreamSubscription? _callEventListen;
-  StreamSubscription? _frameListen;
   bool _wsConnected = false;
   bool _peerConnected = false;
   bool _callRejected = false;
@@ -91,9 +81,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   /// Pantalla grande = el otro; PiP = yo. Tocar PiP intercambia.
   bool _remoteIsMain = true;
-  Uint8List? _remoteJpeg;
-  int _frameSkip = 0;
-  bool _encodingFrame = false;
+  WebRtcCallSession? _webrtc;
+  bool _webrtcReady = false;
+  bool _remoteVideoReady = false;
 
   @override
   void initState() {
@@ -103,7 +93,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   }
 
   Future<void> _boot() async {
-    // Nombre propio: es el que verá el otro en la llamada entrante
     try {
       final me = await AuthService().getCurrentUser();
       if (me != null && me.name.isNotEmpty) _myName = me.name;
@@ -123,8 +112,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
     await _voice.init();
     await _sign.start();
-    await _initCamera();
     await _initRoom();
+    await _startWebRtc();
 
     if (_role == CallUserRole.hearing && mic.isGranted) {
       await _startHearingMode();
@@ -135,138 +124,59 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     });
   }
 
-  Future<void> _initCamera() async {
+  Future<void> _startWebRtc() async {
+    final me = widget.currentUserId;
+    if (me == null || me.isEmpty || _roomId.isEmpty || _roomId.startsWith('solo')) {
+      return;
+    }
     try {
-      _cameras = await availableCameras();
-      if (_cameras.isEmpty) {
-        setState(() => _statusHint = 'No hay cámara disponible');
-        return;
-      }
-      final cam = _cameras.firstWhere(
-        (c) =>
-            c.lensDirection ==
-            (_isFront ? CameraLensDirection.front : CameraLensDirection.back),
-        orElse: () => _cameras.first,
+      final session = WebRtcCallSession(
+        calls: _calls,
+        roomId: _roomId,
+        localUserId: me,
+        isCaller: widget.isCaller,
       );
-      await _openCamera(cam);
+      await session.start();
+      session.remoteReady.addListener(_onRemoteVideoReady);
+      _webrtc = session;
+      if (!mounted) return;
+      setState(() {
+        _webrtcReady = true;
+        _ready = true;
+        _statusHint = widget.isCaller
+            ? 'Video listo · llamando a ${widget.userName}…'
+            : 'Video listo · conectando…';
+      });
+      // Si el otro ya estaba en la sala, negociar ya
+      if (_peerConnected) {
+        await session.onPeerJoined();
+      }
     } catch (e) {
-      debugPrint('initCamera: $e');
-      if (mounted) setState(() => _statusHint = 'Error al abrir cámara');
+      debugPrint('WebRTC start: $e');
+      if (mounted) {
+        setState(() => _statusHint = 'Error de video: $e');
+      }
     }
   }
 
-  Future<void> _openCamera(CameraDescription desc) async {
-    final previous = _camera;
-    _camera = CameraController(
-      desc,
-      ResolutionPreset.medium, // buena calidad sin aplastar + detección OK
-      enableAudio: false,
-      imageFormatGroup:
-          Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
-    );
-    await previous?.dispose();
-    await _camera!.initialize();
+  void _onRemoteVideoReady() {
     if (!mounted) return;
-
-    _sign.syncOrientation(_camera);
-    await _camera!.startImageStream(_onFrame);
+    final ready = _webrtc?.remoteReady.value ?? false;
     setState(() {
-      _ready = true;
-      _statusHint = _role == CallUserRole.deaf
-          ? 'Detección LSB en vivo — haz señas'
-          : 'Habla: el otro leerá subtítulos';
+      _remoteVideoReady = ready;
+      if (ready) {
+        _statusHint = 'Videollamada en vivo';
+      }
     });
   }
 
   Future<void> _flipCamera() async {
-    if (_cameras.length < 2) return;
     _isFront = !_isFront;
-    final cam = _cameras.firstWhere(
-      (c) =>
-          c.lensDirection ==
-          (_isFront ? CameraLensDirection.front : CameraLensDirection.back),
-      orElse: () => _cameras.first,
-    );
-    setState(() => _ready = false);
-    await _openCamera(cam);
-  }
-
-  Future<void> _onFrame(CameraImage image) async {
-    if (_camera == null || _isVideoOff) return;
-
-    // Video en vivo hacia el otro (JPEG liviano), aunque no sea rol sordo
-    _maybeSendVideoFrame(image);
-
-    if (_processing || _role != CallUserRole.deaf) return;
-    _processing = true;
     try {
-      _sign.syncOrientation(_camera);
-      final result = await _sign.processCameraImage(
-        image,
-        camera: _camera!.description,
-      );
-      if (result == null || !mounted) return;
-
-      if (result.handsVisible != _handsVisible) {
-        setState(() => _handsVisible = result.handsVisible);
-      }
-
-      // Feedback en vivo aunque no haya frase aún
-      if (result.phrase.isEmpty) {
-        if (result.status == 'manos' || result.status == 'cuerpo') {
-          setState(() {
-            _statusHint = result.status == 'manos'
-                ? 'Manos OK — haz la seña'
-                : 'Cuerpo OK — sube las manos';
-          });
-        }
-        return;
-      }
-
-      // Subtítulo al instante; la voz espera a que la frase esté completa
-      if (result.phrase.isNotEmpty) {
-        final agent =
-            await SignLanguageAiAgent.instance.ingestSign(result.phrase);
-        if (!mounted) return;
-        _showOnScreenCaption(agent.sentence);
-        _scheduleSignSpeak();
-      }
-    } finally {
-      _processing = false;
+      await _webrtc?.switchCamera();
+    } catch (e) {
+      debugPrint('flip webrtc: $e');
     }
-  }
-
-  void _maybeSendVideoFrame(CameraImage image) {
-    if (!_peerConnected || _isVideoOff || _encodingFrame) return;
-    if (_roomId.isEmpty || widget.currentUserId == null) return;
-    _frameSkip = (_frameSkip + 1) % 3;
-    if (_frameSkip != 0) return;
-
-    _encodingFrame = true;
-    // Copiar planos YA (sync) antes de que el buffer de cámara se recicle
-    final fut = VideoFrameCodec.encodeJpeg(image);
-    final me = widget.currentUserId!;
-    final room = _roomId;
-    unawaited(fut.then((jpeg) {
-      _encodingFrame = false;
-      if (jpeg == null || !mounted || _isVideoOff) return;
-      _calls.sendFrame(roomId: room, senderId: me, jpegBytes: jpeg);
-    }).catchError((_) {
-      _encodingFrame = false;
-    }));
-  }
-
-  /// Envía y habla la frase de señas cuando el usuario deja de señar.
-  void _scheduleSignSpeak() {
-    _signSpeakTimer?.cancel();
-    _signSpeakTimer = Timer(const Duration(milliseconds: 850), () async {
-      final agent = await SignLanguageAiAgent.instance.flush();
-      if (!mounted) return;
-      final sentence = agent.sentence.trim();
-      if (sentence.isEmpty || sentence == _lastSpokenSign) return;
-      _lastSpokenSign = sentence;
-      unawaited(_emitLocalCaption(sentence, role: 'sign', speak: true));
-    });
   }
 
   void _showOnScreenCaption(String text, {bool fromRemote = false}) {
@@ -347,14 +257,18 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         final type = msg['type']?.toString();
         if (type == 'peer_joined') {
           _ringTimeout?.cancel();
+          _reRingTimer?.cancel();
           setState(() {
             _peerConnected = true;
-            _statusHint = 'Conectado · subtítulos activos';
+            _statusHint = _remoteVideoReady
+                ? 'Videollamada en vivo'
+                : 'Conectado · abriendo video…';
           });
+          unawaited(_webrtc?.onPeerJoined());
         } else if (type == 'peer_left') {
           setState(() {
             _peerConnected = false;
-            _remoteJpeg = null;
+            _remoteVideoReady = false;
             _statusHint = 'El otro usuario salió';
           });
         } else if (type == 'joined') {
@@ -363,11 +277,14 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           setState(() {
             _peerConnected = n > 0;
             _statusHint = n > 0
-                ? 'Sala lista · subtítulos en pantalla'
+                ? 'Sala lista · abriendo video…'
                 : (widget.isCaller
                     ? 'Llamando... esperando que conteste'
-                    : 'En llamada · subtítulos listos');
+                    : 'En llamada · esperando video');
           });
+          if (n > 0) {
+            unawaited(_webrtc?.onPeerJoined());
+          }
         }
       });
 
@@ -380,18 +297,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             _statusHint = 'Llamada rechazada';
           });
         }
-      });
-
-      _frameListen = _calls.frames.listen((msg) {
-        final sender = msg['userId']?.toString() ?? '';
-        if (sender == me || sender.isEmpty) return;
-        final b64 = (msg['data'] ?? '').toString();
-        if (b64.isEmpty) return;
-        try {
-          final bytes = base64Decode(b64);
-          if (!mounted) return;
-          setState(() => _remoteJpeg = bytes);
-        } catch (_) {}
       });
     } catch (e) {
       debugPrint('initRoom: $e');
@@ -484,11 +389,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     _ringTimeout?.cancel();
     _reRingTimer?.cancel();
     _captionHoldTimer?.cancel();
-    _signSpeakTimer?.cancel();
     _captionListen?.cancel();
     _peerListen?.cancel();
     _callEventListen?.cancel();
-    _frameListen?.cancel();
+    _webrtc?.remoteReady.removeListener(_onRemoteVideoReady);
+    unawaited(_webrtc?.dispose());
+    _webrtc = null;
     final me = widget.currentUserId;
     if (me != null) {
       unawaited(CallInviteService.instance.endCall(me));
@@ -602,10 +508,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        _handsVisible
-                            ? Icons.front_hand_rounded
-                            : Icons.search_rounded,
-                        color: _handsVisible
+                        _remoteVideoReady
+                            ? Icons.videocam_rounded
+                            : Icons.hourglass_top_rounded,
+                        color: _remoteVideoReady
                             ? const Color(0xff2ECC71)
                             : Colors.white70,
                         size: 16,
@@ -677,6 +583,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                   active: _isMuted,
                   onTap: () async {
                     setState(() => _isMuted = !_isMuted);
+                    await _webrtc?.setMicEnabled(!_isMuted);
                     if (_isMuted) {
                       await _voice.stopListening();
                     } else if (_role == CallUserRole.hearing) {
@@ -687,7 +594,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 _btn(
                   icon: _isVideoOff ? Icons.videocam_off : Icons.videocam,
                   active: _isVideoOff,
-                  onTap: () => setState(() => _isVideoOff = !_isVideoOff),
+                  onTap: () async {
+                    setState(() => _isVideoOff = !_isVideoOff);
+                    await _webrtc?.setCamEnabled(!_isVideoOff);
+                  },
                 ),
                 _btn(
                   icon: Icons.cameraswitch_rounded,
@@ -774,30 +684,35 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         label: 'Sin permiso de cámara',
       );
     }
-    if (!_ready || _camera == null || _isVideoOff) {
+    if (_isVideoOff) {
       return _placeholder(
-        icon: _isVideoOff ? Icons.videocam_off_rounded : Icons.person_rounded,
-        label: _isVideoOff ? 'Cámara apagada' : 'Tu cámara…',
+        icon: Icons.videocam_off_rounded,
+        label: 'Cámara apagada',
       );
     }
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        CameraCoverPreview(controller: _camera!),
-        if (full)
-          HandPointsOverlay(frames: _sign.points, mirror: _isFront),
-      ],
+    final webrtc = _webrtc;
+    if (_webrtcReady && webrtc != null) {
+      return RTCVideoView(
+        webrtc.localRenderer,
+        mirror: _isFront,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+      );
+    }
+    if (_ready && _camera != null) {
+      return CameraCoverPreview(controller: _camera!);
+    }
+    return _placeholder(
+      icon: Icons.person_rounded,
+      label: 'Tu cámara…',
     );
   }
 
   Widget _buildRemoteView({required bool full}) {
-    if (_remoteJpeg != null) {
-      return Image.memory(
-        _remoteJpeg!,
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
-        width: double.infinity,
-        height: double.infinity,
+    final webrtc = _webrtc;
+    if (_remoteVideoReady && webrtc != null) {
+      return RTCVideoView(
+        webrtc.remoteRenderer,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
       );
     }
     return _placeholder(
@@ -805,7 +720,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           ? Icons.videocam_rounded
           : Icons.hourglass_top_rounded,
       label: _peerConnected
-          ? 'Esperando video de ${widget.userName}…'
+          ? 'Conectando video de ${widget.userName}…'
           : (widget.isCaller
               ? 'Llamando a ${widget.userName}…'
               : 'Conectando…'),
