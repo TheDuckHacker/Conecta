@@ -128,11 +128,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     await _sign.start();
     await _initRoom();
 
-    // Modo sordo: la cámara es de ML Kit (señas). WebRTC solo audio.
-    // Modo oyente: WebRTC con video completo.
+    // WebRTC PRIMERO: si el otro ya mandó offer, hay que estar escuchando.
+    // La cámara LSB (modo sordo) se abre después.
     if (_role == CallUserRole.deaf) {
-      await _startSignCamera();
       await _startWebRtc(enableLocalVideo: false);
+      unawaited(_startSignCamera());
     } else {
       await _startWebRtc(enableLocalVideo: true);
       if (mic.isGranted) await _startHearingMode();
@@ -485,13 +485,21 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
       _callEventListen = CallInviteService.instance.callEvents.listen((msg) {
         if (!mounted) return;
-        if (msg['type']?.toString() == 'call_response' &&
-            msg['accepted'] == false) {
+        if (msg['type']?.toString() != 'call_response') return;
+        final accepted = msg['accepted'] == true;
+        if (!accepted) {
           setState(() {
             _callRejected = true;
             _statusHint = 'Llamada rechazada';
           });
+          return;
         }
+        // El otro contestó: forzar renegociación por si peer_joined se adelantó
+        setState(() {
+          _peerConnected = true;
+          _statusHint = 'Contestó · conectando video…';
+        });
+        unawaited(_webrtc?.onPeerJoined());
       });
 
       _frameListen = _calls.frames.listen((msg) {

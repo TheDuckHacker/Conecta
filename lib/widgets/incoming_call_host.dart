@@ -107,34 +107,44 @@ class _IncomingCallHostState extends State<IncomingCallHost>
     final call = _call;
     if (call == null || _starting) return;
     _starting = true;
-    await _ringtone.stop();
-    await _notifications.cancelIncomingCall();
-    await _invites.acceptCall(call);
-    if (!mounted) return;
-    setState(() => _call = null);
+    try {
+      await _ringtone.stop();
+      await _notifications.cancelIncomingCall();
+      await _invites.acceptCall(call);
+      if (!mounted) return;
+      setState(() => _call = null);
 
-    final me = await _auth.getCurrentUser();
-    if (!mounted || me == null) {
-      _starting = false;
-      return;
-    }
+      final me = await _auth.getCurrentUser();
+      if (!mounted || me == null) {
+        _starting = false;
+        return;
+      }
 
-    await Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute(
-        builder: (_) => VideoCallScreen(
-          userName: call.fromName,
-          userAvatar: '',
-          isVideoCall: true,
-          currentUserId: me.$id,
-          otherUserId: call.fromUserId,
-          roomId: call.roomId,
-          isCaller: false,
-          initialRole: CallUserRole.deaf,
+      await Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute(
+          builder: (_) => VideoCallScreen(
+            userName: call.fromName,
+            userAvatar: '',
+            isVideoCall: true,
+            currentUserId: me.$id,
+            otherUserId: call.fromUserId,
+            roomId: call.roomId,
+            isCaller: false,
+            initialRole: CallUserRole.deaf,
+          ),
         ),
-      ),
-    );
-    await _invites.endCall(me.$id);
-    _starting = false;
+      );
+      await _invites.endCall(me.$id);
+    } catch (e) {
+      debugPrint('accept call: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo contestar: $e')),
+        );
+      }
+    } finally {
+      _starting = false;
+    }
   }
 
   Future<void> _reject() async {

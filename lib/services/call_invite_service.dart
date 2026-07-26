@@ -317,6 +317,13 @@ class CallInviteService {
     if (me != null) {
       await _setStatus(me, 'in_call:${call.roomId}');
     }
+    // Avisar al llamante que contestaron (además de entrar a la sala)
+    _calls.sendCallResponse(
+      toUserId: call.fromUserId,
+      fromUserId: me ?? '',
+      roomId: call.roomId,
+      accepted: true,
+    );
   }
 
   Future<void> rejectCall(IncomingCall call) async {

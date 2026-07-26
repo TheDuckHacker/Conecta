@@ -6,6 +6,11 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'call_service.dart';
 
 /// Videollamada WebRTC real (P2P) usando el WebSocket de Conecta como señalización.
+///
+/// Negociación simple y estable:
+/// - Solo el [isCaller] crea ofertas.
+/// - El que contesta solo responde (answer).
+/// - El caller reintenta el offer hasta recibir answer / conectar.
 class WebRtcCallSession {
   WebRtcCallSession({
     required this.calls,
@@ -31,7 +36,11 @@ class WebRtcCallSession {
   bool _makingOffer = false;
   bool _disposed = false;
   bool _remoteDescriptionSet = false;
+  bool _answered = false;
+  bool _peerSeen = false;
+  Timer? _offerRetry;
   final _pendingCandidates = <RTCIceCandidate>[];
+  final _earlySignals = <Map<String, dynamic>>[];
 
   final _remoteReady = ValueNotifier<bool>(false);
   final _localReady = ValueNotifier<bool>(false);
@@ -42,9 +51,7 @@ class WebRtcCallSession {
     if (_disposed) return;
     try {
       _remoteReady.value = value;
-    } catch (_) {
-      // notifier ya liberado
-    }
+    } catch (_) {}
   }
 
   void _setLocalReady(bool value) {
@@ -54,7 +61,6 @@ class WebRtcCallSession {
     } catch (_) {}
   }
 
-  /// Seguro para pintar: hay textura nativa Y stream asignado.
   bool get canRenderLocal =>
       !_disposed &&
       localRenderer.textureId != null &&
@@ -74,6 +80,9 @@ class WebRtcCallSession {
   };
 
   Future<void> start() async {
+    // Escuchar señales YA (por si el offer llega mientras abrimos cámara)
+    _signalSub = calls.signals.listen(_onSignal);
+
     await localRenderer.initialize();
     await remoteRenderer.initialize();
 
@@ -89,7 +98,8 @@ class WebRtcCallSession {
           : false,
     });
     localRenderer.onFirstFrameRendered = () => _setLocalReady(canRenderLocal);
-    remoteRenderer.onFirstFrameRendered = () => _setRemoteReady(canRenderRemote);
+    remoteRenderer.onFirstFrameRendered =
+        () => _setRemoteReady(canRenderRemote);
     remoteRenderer.onResize = () => _setRemoteReady(canRenderRemote);
 
     if (enableLocalVideo) {
@@ -135,6 +145,8 @@ class WebRtcCallSession {
     _pc!.onConnectionState = (RTCPeerConnectionState state) {
       debugPrint('WebRTC connection: $state');
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _answered = true;
+        _offerRetry?.cancel();
         _setRemoteReady(canRenderRemote);
       } else if (state ==
               RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
@@ -144,29 +156,45 @@ class WebRtcCallSession {
       }
     };
 
-    _signalSub = calls.signals.listen(_onSignal);
+    // Procesar señales que llegaron antes de tener PC
+    final early = List<Map<String, dynamic>>.from(_earlySignals);
+    _earlySignals.clear();
+    for (final msg in early) {
+      await _onSignal(msg);
+    }
 
-    // Oferta solo cuando el otro ya está (o en onPeerJoined).
+    if (_peerSeen && isCaller) {
+      await _createAndSendOffer();
+      _startOfferRetry();
+    }
   }
 
-  /// Llamar cuando el peer entra a la sala (quien no es caller también puede
-  /// necesitar re-negociar; el caller reenvía offer).
+  /// Solo el llamante crea ofertas. El que contesta solo hace answer.
   Future<void> onPeerJoined() async {
     if (_disposed) return;
-    if (isCaller) {
-      await _createAndSendOffer();
-      return;
-    }
-    // Respaldo: si el offer del caller no llega, ofrecemos nosotros
-    Future.delayed(const Duration(milliseconds: 2500), () async {
-      if (_disposed || _remoteDescriptionSet) return;
+    _peerSeen = true;
+    if (!isCaller) return;
+    await _createAndSendOffer();
+    _startOfferRetry();
+  }
+
+  void _startOfferRetry() {
+    if (!isCaller || _disposed) return;
+    _offerRetry?.cancel();
+    _offerRetry = Timer.periodic(const Duration(seconds: 2), (t) async {
+      if (_disposed || _answered) {
+        t.cancel();
+        return;
+      }
+      debugPrint('WebRTC: reenviando offer…');
       await _createAndSendOffer();
     });
   }
 
   Future<void> _createAndSendOffer() async {
     final pc = _pc;
-    if (pc == null || _disposed || _makingOffer) return;
+    if (pc == null || _disposed || _makingOffer || !isCaller) return;
+    if (_answered) return;
     _makingOffer = true;
     try {
       final offer = await pc.createOffer({
@@ -183,6 +211,7 @@ class WebRtcCallSession {
           'sdpType': offer.type,
         },
       );
+      debugPrint('WebRTC: offer enviado');
     } catch (e) {
       debugPrint('WebRTC offer: $e');
     } finally {
@@ -194,40 +223,36 @@ class WebRtcCallSession {
     if (_disposed) return;
     final from = msg['userId']?.toString() ?? '';
     if (from.isEmpty || from == localUserId) return;
+
+    final pc = _pc;
+    if (pc == null) {
+      if (_earlySignals.length < 40) _earlySignals.add(msg);
+      return;
+    }
+
     final payload = msg['payload'];
     if (payload is! Map) return;
     final map = Map<String, dynamic>.from(payload);
     final type = map['type']?.toString();
-    final pc = _pc;
-    if (pc == null) return;
 
     try {
       switch (type) {
         case 'offer':
-          await pc.setRemoteDescription(
-            RTCSessionDescription(
-              map['sdp']?.toString(),
-              map['sdpType']?.toString() ?? 'offer',
-            ),
-          );
-          _remoteDescriptionSet = true;
-          await _drainCandidates();
-          final answer = await pc.createAnswer({
-            'offerToReceiveAudio': true,
-            'offerToReceiveVideo': true,
-          });
-          await pc.setLocalDescription(answer);
-          calls.sendSignal(
-            roomId: roomId,
-            userId: localUserId,
-            payload: {
-              'type': 'answer',
-              'sdp': answer.sdp,
-              'sdpType': answer.type,
-            },
-          );
+          // El caller ignora offers ajenos (evita glare)
+          if (isCaller) {
+            debugPrint('WebRTC: ignorando offer (somos caller)');
+            return;
+          }
+          await _handleRemoteOffer(pc, map);
           break;
         case 'answer':
+          if (!isCaller) return;
+          final state = pc.signalingState;
+          if (state !=
+              RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+            debugPrint('WebRTC: answer fuera de estado ($state)');
+            return;
+          }
           await pc.setRemoteDescription(
             RTCSessionDescription(
               map['sdp']?.toString(),
@@ -235,7 +260,10 @@ class WebRtcCallSession {
             ),
           );
           _remoteDescriptionSet = true;
+          _answered = true;
+          _offerRetry?.cancel();
           await _drainCandidates();
+          debugPrint('WebRTC: answer aplicado');
           break;
         case 'ice':
           final c = RTCIceCandidate(
@@ -255,6 +283,45 @@ class WebRtcCallSession {
     } catch (e) {
       debugPrint('WebRTC signal $type: $e');
     }
+  }
+
+  Future<void> _handleRemoteOffer(
+    RTCPeerConnection pc,
+    Map<String, dynamic> map,
+  ) async {
+    final state = pc.signalingState;
+    // Si ya contestamos, ignorar offers duplicados
+    if (_answered &&
+        state == RTCSignalingState.RTCSignalingStateStable) {
+      debugPrint('WebRTC: offer duplicado ignorado');
+      return;
+    }
+
+    await pc.setRemoteDescription(
+      RTCSessionDescription(
+        map['sdp']?.toString(),
+        map['sdpType']?.toString() ?? 'offer',
+      ),
+    );
+    _remoteDescriptionSet = true;
+    await _drainCandidates();
+
+    final answer = await pc.createAnswer({
+      'offerToReceiveAudio': true,
+      'offerToReceiveVideo': true,
+    });
+    await pc.setLocalDescription(answer);
+    calls.sendSignal(
+      roomId: roomId,
+      userId: localUserId,
+      payload: {
+        'type': 'answer',
+        'sdp': answer.sdp,
+        'sdpType': answer.type,
+      },
+    );
+    _answered = true;
+    debugPrint('WebRTC: answer enviado');
   }
 
   Future<void> _drainCandidates() async {
@@ -292,11 +359,11 @@ class WebRtcCallSession {
 
   Future<void> dispose() async {
     if (_disposed) return;
-    // Avisar a la UI que deje de pintar las texturas ANTES de destruirlas:
-    // si no, RTCVideoView lee textureId! ya nulo y truena.
     _setLocalReady(false);
     _setRemoteReady(false);
     _disposed = true;
+    _offerRetry?.cancel();
+    _offerRetry = null;
 
     await _signalSub?.cancel();
     _signalSub = null;
@@ -317,8 +384,6 @@ class WebRtcCallSession {
     } catch (_) {}
     _localStream = null;
 
-    // Soltar el stream de cada renderer y dejar pasar un frame para que la UI
-    // ya no dependa de la textura.
     try {
       localRenderer.srcObject = null;
     } catch (_) {}
@@ -332,7 +397,5 @@ class WebRtcCallSession {
     try {
       await remoteRenderer.dispose();
     } catch (_) {}
-    // Los notifiers no se liberan a propósito: la pantalla puede seguir
-    // quitando listeners después de cerrar la llamada.
   }
 }
