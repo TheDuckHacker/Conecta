@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/call_service.dart';
 import 'package:conecta_lsb/services/call_invite_service.dart';
 import 'package:conecta_lsb/services/help_agent_service.dart';
@@ -72,6 +73,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   String _lastSpokenSign = '';
 
   String _roomId = '';
+  String _myName = 'Contacto';
   StreamSubscription? _captionListen;
   StreamSubscription? _peerListen;
   StreamSubscription? _callEventListen;
@@ -80,6 +82,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   bool _callRejected = false;
   Timer? _timer;
   Timer? _ringTimeout;
+  Timer? _reRingTimer;
   int _seconds = 0;
 
   @override
@@ -90,6 +93,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   }
 
   Future<void> _boot() async {
+    // Nombre propio: es el que verá el otro en la llamada entrante
+    try {
+      final me = await AuthService().getCurrentUser();
+      if (me != null && me.name.isNotEmpty) _myName = me.name;
+    } catch (_) {}
+
     final cam = await Permission.camera.request();
     final mic = await Permission.microphone.request();
     if (!cam.isGranted) {
@@ -278,9 +287,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       }
 
       if (widget.isCaller) {
+        _startReRinging(me, other);
         _ringTimeout = Timer(const Duration(seconds: 45), () {
+          _reRingTimer?.cancel();
           if (!mounted || _peerConnected) return;
-          setState(() => _statusHint = 'Sin respuesta — sigue en sala');
+          setState(() => _statusHint =
+              'Sin respuesta — el contacto debe tener Conecta abierta');
         });
       }
 
@@ -340,6 +352,24 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         setState(() => _statusHint = 'Reconectando servidor...');
       }
     }
+  }
+
+  /// Timbra cada 3 s hasta que el otro entre (o se agote el tiempo).
+  void _startReRinging(String me, String? other) {
+    if (other == null || other.isEmpty) return;
+    _reRingTimer?.cancel();
+    _reRingTimer = Timer.periodic(const Duration(seconds: 3), (t) async {
+      if (!mounted || _peerConnected || _callRejected) {
+        t.cancel();
+        return;
+      }
+      await CallInviteService.instance.reRing(
+        callerId: me,
+        callerName: _myName,
+        calleeId: other,
+        roomId: _roomId,
+      );
+    });
   }
 
   Future<void> _emitLocalCaption(
@@ -405,6 +435,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   void dispose() {
     _timer?.cancel();
     _ringTimeout?.cancel();
+    _reRingTimer?.cancel();
     _captionHoldTimer?.cancel();
     _signSpeakTimer?.cancel();
     _captionListen?.cancel();

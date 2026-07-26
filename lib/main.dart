@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:conecta_lsb/screens/login.dart';
 import 'package:conecta_lsb/screens/chat.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
+import 'package:conecta_lsb/services/call_invite_service.dart';
 import 'package:conecta_lsb/services/notification_service.dart';
 import 'package:conecta_lsb/services/settings_service.dart';
 import 'package:conecta_lsb/widgets/incoming_call_host.dart';
@@ -68,8 +69,8 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       });
       if (user != null && !_markedOnline) {
         _markedOnline = true;
-        // No bloquear la UI esperando el status
-        _authService.setOnlineStatus(user.$id, true);
+        // force: limpia estados atascados (ringing/in_call de una llamada previa)
+        _authService.setOnlineStatus(user.$id, true, force: true);
       }
     } catch (e) {
       debugPrint('Auth check failed: $e');
@@ -95,10 +96,13 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       if (userId == null) return;
 
       if (state == AppLifecycleState.resumed) {
+        // Refrescar llamada entrante ANTES de marcar online (por si hay ringing)
+        await CallInviteService.instance.refreshIncoming();
         await _authService.setOnlineStatus(userId, true);
         _markedOnline = true;
       } else if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.detached) {
+        // setOnlineStatus ya no pisa ringing/in_call
         await _authService.setOnlineStatus(userId, false);
         _markedOnline = false;
       }

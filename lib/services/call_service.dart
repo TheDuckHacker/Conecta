@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:appwrite/models.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'chat_service.dart';
 
@@ -19,6 +20,11 @@ class RealtimeConfig {
         .replaceFirst('https://', 'wss://')
         .replaceFirst('http://', 'ws://');
     return Uri.parse('$ws/ws');
+  }
+
+  static Uri get healthUri {
+    final base = httpBase.trim().replaceAll(RegExp(r'/$'), '');
+    return Uri.parse('$base/health');
   }
 }
 
@@ -42,6 +48,7 @@ class CallService {
   Timer? _lobbyReconnect;
   String? _lobbyUserId;
   void Function(Map<String, dynamic>)? _onInvite;
+  Completer<void>? _lobbyReady;
 
   final _captionController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -57,6 +64,8 @@ class CallService {
   Stream<Map<String, dynamic>> get callEvents => _callEventController.stream;
 
   bool get isConnected => _channel != null;
+  bool get isLobbyConnected =>
+      _lobbyChannel != null && _lobbyReady?.isCompleted == true;
 
   Future<Document> createOrJoinRoom({
     required String currentUserId,
@@ -68,6 +77,19 @@ class CallService {
     );
   }
 
+  /// Despierta Render (free tier se duerme) antes de llamar.
+  Future<bool> wakeServer() async {
+    try {
+      final res = await http
+          .get(RealtimeConfig.healthUri)
+          .timeout(const Duration(seconds: 20));
+      return res.statusCode >= 200 && res.statusCode < 500;
+    } catch (e) {
+      debugPrint('wakeServer: $e');
+      return false;
+    }
+  }
+
   /// Conecta al lobby personal `lobby:<userId>` para recibir invitaciones.
   Future<void> connectLobby({
     required String userId,
@@ -76,6 +98,9 @@ class CallService {
     _lobbyUserId = userId;
     _onInvite = onInvite;
     await disconnectLobby(reconnect: false);
+
+    final ready = Completer<void>();
+    _lobbyReady = ready;
 
     try {
       debugPrint('Lobby connect ${RealtimeConfig.wsUri}');
@@ -87,6 +112,9 @@ class CallService {
           try {
             final msg = jsonDecode(raw as String) as Map<String, dynamic>;
             final type = msg['type']?.toString();
+            if (type == 'welcome' || type == 'joined' || type == 'pong') {
+              if (!ready.isCompleted) ready.complete();
+            }
             if (type == 'invite') {
               _onInvite?.call(msg);
               _callEventController.add(msg);
@@ -109,14 +137,31 @@ class CallService {
         'role': 'lobby',
       });
 
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (!ready.isCompleted) ready.complete();
+      });
+
       _lobbyPing?.cancel();
       _lobbyPing = Timer.periodic(const Duration(seconds: 25), (_) {
         _lobbySend({'type': 'ping'});
       });
     } catch (e) {
       debugPrint('Lobby connect failed: $e');
+      if (!ready.isCompleted) ready.completeError(e);
       _scheduleLobbyReconnect();
     }
+  }
+
+  Future<void> ensureLobby({
+    required String userId,
+    required void Function(Map<String, dynamic>) onInvite,
+  }) async {
+    if (isLobbyConnected && _lobbyUserId == userId) return;
+    await wakeServer();
+    await connectLobby(userId: userId, onInvite: onInvite);
+    try {
+      await _lobbyReady?.future.timeout(const Duration(seconds: 10));
+    } catch (_) {}
   }
 
   void _scheduleLobbyReconnect() {
@@ -139,7 +184,8 @@ class CallService {
     } catch (_) {}
   }
 
-  void sendInvite({
+  /// Envía invitación al lobby del destinatario.
+  bool sendInvite({
     required String toUserId,
     required String fromUserId,
     required String fromName,
@@ -147,29 +193,27 @@ class CallService {
   }) {
     final payload = {
       'type': 'invite',
-      'roomId': 'lobby:$toUserId',
-      'userId': fromUserId,
+      'targetLobby': 'lobby:$toUserId',
       'toUserId': toUserId,
       'fromUserId': fromUserId,
       'fromName': fromName,
       'callRoomId': roomId,
-    };
-    // Intentar por lobby propio; el servidor reenvía a lobby del destinatario
-    if (_lobbyChannel != null) {
-      _lobbySend({
-        ...payload,
-        'type': 'invite',
-        'roomId': roomId,
-        'targetLobby': 'lobby:$toUserId',
-      });
-    }
-    // También por canal de sala si está activo
-    _send({
-      ...payload,
-      'type': 'invite',
-      'targetLobby': 'lobby:$toUserId',
       'roomId': roomId,
-    });
+      'userId': fromUserId,
+    };
+    var sent = false;
+    if (_lobbyChannel != null) {
+      _lobbySend(payload);
+      sent = true;
+    }
+    if (_channel != null) {
+      _send(payload);
+      sent = true;
+    }
+    if (!sent) {
+      debugPrint('sendInvite: sin canal WS (lobby ni sala)');
+    }
+    return sent;
   }
 
   void sendCallResponse({
@@ -203,6 +247,7 @@ class CallService {
       await _lobbyChannel?.sink.close();
     } catch (_) {}
     _lobbyChannel = null;
+    _lobbyReady = null;
   }
 
   Future<void> connect({

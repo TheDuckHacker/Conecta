@@ -441,7 +441,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     } catch (_) {}
 
     String? roomId;
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
     try {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Llamando… asegúrate que el contacto tenga Conecta abierta'),
+          duration: Duration(seconds: 3),
+        ),
+      );
       roomId = await CallInviteService.instance.startOutgoingCall(
         callerId: me,
         callerName: callerName,
@@ -449,11 +457,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       );
     } catch (e) {
       debugPrint('startOutgoingCall: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al llamar: $e')),
-        );
-      }
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'No llegó la llamada: $e. '
+            'El otro debe tener la app abierta y con internet.',
+          ),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 5),
+        ),
+      );
       return;
     }
 

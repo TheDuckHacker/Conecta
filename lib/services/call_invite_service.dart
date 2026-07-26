@@ -19,7 +19,6 @@ class CallInviteService {
   CallInviteService._();
   static final CallInviteService instance = CallInviteService._();
 
-  final _auth = AuthService();
   final _chat = ChatService();
   final _calls = CallService();
 
@@ -32,6 +31,7 @@ class CallInviteService {
   StreamSubscription? _lobbySub;
   String? _myUserId;
   IncomingCall? _last;
+  DateTime? _lastRingAt;
   bool busyInCall = false;
 
   IncomingCall? get current => _last;
@@ -47,25 +47,42 @@ class CallInviteService {
       _sub = realtime.subscribe([
         'databases.${AppwriteConfig.databaseId}.collections.${AppwriteConfig.usersCollectionId}.documents.$userId',
       ]);
-      _sub!.stream.listen((event) {
-        final data = event.payload;
-        final status = (data['status'] ?? '').toString();
-        _handleStatus(status);
-      });
+      _sub!.stream.listen(
+        (event) {
+          try {
+            final data = event.payload;
+            final status = (data['status'] ?? '').toString();
+            _handleStatus(status);
+          } catch (e) {
+            debugPrint('CallInvite realtime event: $e');
+          }
+        },
+        onError: (e) => debugPrint('CallInvite realtime stream: $e'),
+      );
     } catch (e) {
       debugPrint('CallInvite realtime: $e');
     }
 
-    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _pollStatus());
+    // Respaldo por sondeo: el Realtime de Appwrite falla a veces en el cliente.
+    _poll = Timer.periodic(
+      const Duration(milliseconds: 1500),
+      (_) => _pollStatus(),
+    );
 
+    await _connectLobbySafe(userId);
+    await _pollStatus();
+  }
+
+  Future<void> _connectLobbySafe(String userId) async {
     try {
-      await _calls.connectLobby(
+      await _calls.ensureLobby(
         userId: userId,
         onInvite: (msg) {
           final from = (msg['fromUserId'] ?? '').toString();
           final room = (msg['roomId'] ?? msg['callRoomId'] ?? '').toString();
           final name = (msg['fromName'] ?? 'Contacto').toString();
           if (from.isEmpty || room.isEmpty) return;
+          if (from == _myUserId) return;
           _emit(IncomingCall(
             fromUserId: from,
             fromName: name,
@@ -77,8 +94,6 @@ class CallInviteService {
     } catch (e) {
       debugPrint('CallInvite lobby: $e');
     }
-
-    await _pollStatus();
   }
 
   Future<void> _pollStatus() async {
@@ -94,12 +109,34 @@ class CallInviteService {
     } catch (_) {}
   }
 
+  /// Fuerza relectura (p. ej. al volver de segundo plano).
+  Future<void> refreshIncoming() async {
+    await _pollStatus();
+    final me = _myUserId;
+    if (me != null && !_calls.isLobbyConnected) {
+      await _connectLobbySafe(me);
+    }
+  }
+
   void _handleStatus(String status) {
     if (busyInCall) return;
-    final call = AuthService.parseIncomingCall(status);
+    var call = AuthService.parseIncomingCall(status);
+    // Timbre viejo (quedó guardado de una llamada anterior): no molestar
+    if (call != null && !AuthService.isFreshRinging(status)) {
+      call = null;
+    }
     if (call == null) {
+      // No borrar una llamada reciente por un "online" intermedio (carrera
+      // con lifecycle). Mantener ~45 s desde el último ring.
       if (_last != null) {
+        final age = _lastRingAt == null
+            ? const Duration(days: 1)
+            : DateTime.now().difference(_lastRingAt!);
+        if (age < const Duration(seconds: 45)) {
+          return;
+        }
         _last = null;
+        _lastRingAt = null;
         _incomingController.add(null);
       }
       return;
@@ -114,6 +151,7 @@ class CallInviteService {
         _last!.roomId == call.roomId;
     if (same) return;
     _last = call;
+    _lastRingAt = DateTime.now();
     _incomingController.add(call);
   }
 
@@ -122,6 +160,10 @@ class CallInviteService {
     required String callerName,
     required String calleeId,
   }) async {
+    // 1) Despertar Render + asegurar lobby del llamante
+    await _calls.wakeServer();
+    await _connectLobbySafe(callerId);
+
     final room = await _chat.resolveChat(
       userId: callerId,
       otherUserId: calleeId,
@@ -130,32 +172,116 @@ class CallInviteService {
 
     final encoded =
         Uri.encodeComponent(callerName.isEmpty ? 'Contacto' : callerName);
-    final status = 'ringing:$callerId:$roomId:$encoded';
+    final ringAt = DateTime.now().millisecondsSinceEpoch;
+    final status = 'ringing:$callerId:$roomId:$encoded:$ringAt';
 
-    try {
-      await databases.updateDocument(
-        databaseId: AppwriteConfig.databaseId,
-        collectionId: AppwriteConfig.usersCollectionId,
-        documentId: calleeId,
-        data: {'status': status},
-      );
-    } catch (e) {
-      debugPrint('startOutgoingCall status: $e');
+    // 2) Marcar ringing en el documento del destinatario (Appwrite)
+    var statusOk = false;
+    Object? statusError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await databases.updateDocument(
+          databaseId: AppwriteConfig.databaseId,
+          collectionId: AppwriteConfig.usersCollectionId,
+          documentId: calleeId,
+          data: {'status': status},
+        );
+        // Verificar que quedó escrito
+        final check = await databases.getDocument(
+          databaseId: AppwriteConfig.databaseId,
+          collectionId: AppwriteConfig.usersCollectionId,
+          documentId: calleeId,
+        );
+        if ((check.data['status'] ?? '').toString().startsWith('ringing:')) {
+          statusOk = true;
+          break;
+        }
+      } catch (e) {
+        statusError = e;
+        debugPrint('startOutgoingCall status try $attempt: $e');
+        await Future.delayed(Duration(milliseconds: 300 * (attempt + 1)));
+      }
     }
 
-    _calls.sendInvite(
+    // 3) Invite por WebSocket (inmediato si el otro está en lobby)
+    final wsSent = _calls.sendInvite(
       toUserId: calleeId,
       fromUserId: callerId,
       fromName: callerName.isEmpty ? 'Contacto' : callerName,
       roomId: roomId,
     );
 
+    // Reintento WS un segundo después (por si el lobby recién despertó)
+    Future.delayed(const Duration(seconds: 1), () {
+      _calls.sendInvite(
+        toUserId: calleeId,
+        fromUserId: callerId,
+        fromName: callerName.isEmpty ? 'Contacto' : callerName,
+        roomId: roomId,
+      );
+    });
+
+    if (!statusOk && !wsSent) {
+      throw Exception(
+        'No se pudo avisar al contacto. '
+        'Revisa internet y que el otro tenga Conecta abierta. '
+        '(${statusError ?? 'sin canal'})',
+      );
+    }
+
+    if (!statusOk) {
+      debugPrint(
+        'startOutgoingCall: status Appwrite falló ($statusError); '
+        'invite WS enviado=$wsSent',
+      );
+    }
+
     return roomId;
+  }
+
+  /// Vuelve a timbrar mientras el llamante espera: cubre el caso de que el
+  /// otro celular abra la app o recupere internet unos segundos después.
+  Future<void> reRing({
+    required String callerId,
+    required String callerName,
+    required String calleeId,
+    required String roomId,
+  }) async {
+    final name = callerName.isEmpty ? 'Contacto' : callerName;
+    final encoded = Uri.encodeComponent(name);
+    final ringAt = DateTime.now().millisecondsSinceEpoch;
+
+    try {
+      final doc = await databases.getDocument(
+        databaseId: AppwriteConfig.databaseId,
+        collectionId: AppwriteConfig.usersCollectionId,
+        documentId: calleeId,
+      );
+      final current = (doc.data['status'] ?? '').toString();
+      // Si ya contestó (in_call) no volver a timbrar
+      if (current.startsWith('in_call:')) return;
+      await databases.updateDocument(
+        databaseId: AppwriteConfig.databaseId,
+        collectionId: AppwriteConfig.usersCollectionId,
+        documentId: calleeId,
+        data: {'status': 'ringing:$callerId:$roomId:$encoded:$ringAt'},
+      );
+    } catch (e) {
+      debugPrint('reRing status: $e');
+    }
+
+    _calls.sendInvite(
+      toUserId: calleeId,
+      fromUserId: callerId,
+      fromName: name,
+      roomId: roomId,
+    );
   }
 
   Future<void> acceptCall(IncomingCall call) async {
     busyInCall = true;
     _last = null;
+    _lastRingAt = null;
     _incomingController.add(null);
     final me = _myUserId;
     if (me != null) {
@@ -164,9 +290,10 @@ class CallInviteService {
   }
 
   Future<void> rejectCall(IncomingCall call) async {
+    busyInCall = false;
     final me = _myUserId;
     if (me != null) {
-      await _auth.setOnlineStatus(me, true);
+      await _forceStatus(me, 'online');
     }
     _calls.sendCallResponse(
       toUserId: call.fromUserId,
@@ -175,6 +302,7 @@ class CallInviteService {
       accepted: false,
     );
     _last = null;
+    _lastRingAt = null;
     _incomingController.add(null);
   }
 
@@ -185,7 +313,7 @@ class CallInviteService {
 
   Future<void> endCall(String userId) async {
     busyInCall = false;
-    await _auth.setOnlineStatus(userId, true);
+    await _forceStatus(userId, 'online');
   }
 
   Future<void> clearRingingOnCallee(String calleeId) async {
@@ -197,7 +325,7 @@ class CallInviteService {
       );
       final status = (doc.data['status'] ?? '').toString();
       if (status.startsWith('ringing:')) {
-        await _auth.setOnlineStatus(calleeId, true);
+        await _forceStatus(calleeId, 'online');
       }
     } catch (_) {}
   }
@@ -212,6 +340,20 @@ class CallInviteService {
       );
     } catch (e) {
       debugPrint('setStatus: $e');
+    }
+  }
+
+  /// Fuerza status aunque haya ringing (colgar / rechazar / fin de llamada).
+  Future<void> _forceStatus(String userId, String status) async {
+    try {
+      await databases.updateDocument(
+        databaseId: AppwriteConfig.databaseId,
+        collectionId: AppwriteConfig.usersCollectionId,
+        documentId: userId,
+        data: {'status': status},
+      );
+    } catch (e) {
+      debugPrint('forceStatus: $e');
     }
   }
 

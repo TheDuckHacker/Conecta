@@ -277,7 +277,7 @@ class AuthService {
   /// Convención de `users.status`:
   /// - online / offline
   /// - typing:<chatId>
-  /// - ringing:<fromId>:<roomId>:<nombre>
+  /// - ringing:<fromId>:<roomId>:<nombre>[:<epochMs>]
   /// - in_call:<roomId>
   static bool isOnlineStatus(String status) =>
       status == 'online' ||
@@ -288,6 +288,9 @@ class AuthService {
   static bool isTypingInChat(String status, String chatId) =>
       chatId.isNotEmpty && status == 'typing:$chatId';
 
+  /// Un timbre solo vale unos segundos: evita "llamadas fantasma" pegadas.
+  static const ringTtl = Duration(seconds: 45);
+
   /// Parsea llamada entrante desde status del usuario.
   static IncomingCallInfo? parseIncomingCall(String status) {
     if (!status.startsWith('ringing:')) return null;
@@ -295,18 +298,64 @@ class AuthService {
     if (parts.length < 4) return null;
     final fromId = parts[1];
     final roomId = parts[2];
-    final name = Uri.decodeComponent(parts.sublist(3).join(':'));
+
+    var nameParts = parts.sublist(3);
+    DateTime? startedAt;
+    // Último campo numérico = marca de tiempo del timbre
+    if (nameParts.length >= 2 &&
+        RegExp(r'^\d{10,}$').hasMatch(nameParts.last)) {
+      final ms = int.tryParse(nameParts.last);
+      if (ms != null) {
+        startedAt = DateTime.fromMillisecondsSinceEpoch(ms);
+        nameParts = nameParts.sublist(0, nameParts.length - 1);
+      }
+    }
+
+    final name = Uri.decodeComponent(nameParts.join(':'));
     if (fromId.isEmpty || roomId.isEmpty) return null;
     return IncomingCallInfo(
       fromUserId: fromId,
       fromName: name.isEmpty ? 'Contacto' : name,
       roomId: roomId,
       rawStatus: status,
+      startedAt: startedAt,
     );
   }
 
-  Future<void> setOnlineStatus(String userId, bool isOnline) async {
+  /// Timbre vigente (no un `ringing:` viejo que quedó guardado).
+  static bool isFreshRinging(String status) {
+    final call = parseIncomingCall(status);
+    if (call == null) return false;
+    final at = call.startedAt;
+    if (at == null) return true; // sin marca: asumir vigente
+    return DateTime.now().difference(at) < ringTtl;
+  }
+
+  /// [force] escribe siempre (inicio de app, colgar, rechazar).
+  Future<void> setOnlineStatus(
+    String userId,
+    bool isOnline, {
+    bool force = false,
+  }) async {
     try {
+      // No pisar un timbre vigente ni una llamada en curso: si no, la llamada
+      // entrante se pierde al minimizar o reabrir la app.
+      if (!force) {
+        try {
+          final doc = await databases.getDocument(
+            databaseId: AppwriteConfig.databaseId,
+            collectionId: AppwriteConfig.usersCollectionId,
+            documentId: userId,
+          );
+          final current = (doc.data['status'] ?? '').toString();
+          if (isFreshRinging(current) ||
+              current.startsWith('in_call:') ||
+              current.startsWith('typing:')) {
+            return;
+          }
+        } catch (_) {}
+      }
+
       await databases.updateDocument(
         databaseId: AppwriteConfig.databaseId,
         collectionId: AppwriteConfig.usersCollectionId,
@@ -385,10 +434,14 @@ class IncomingCallInfo {
   final String roomId;
   final String rawStatus;
 
+  /// Momento en que el llamante marcó (si viene en el status).
+  final DateTime? startedAt;
+
   const IncomingCallInfo({
     required this.fromUserId,
     required this.fromName,
     required this.roomId,
     required this.rawStatus,
+    this.startedAt,
   });
 }

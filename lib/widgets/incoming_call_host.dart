@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/call_invite_service.dart';
+import 'package:conecta_lsb/services/call_ringtone_service.dart';
 import 'package:conecta_lsb/services/notification_service.dart';
 import 'package:conecta_lsb/screens/video_call_screen.dart';
 
@@ -21,7 +22,9 @@ class _IncomingCallHostState extends State<IncomingCallHost>
   final _auth = AuthService();
   final _invites = CallInviteService.instance;
   final _notifications = NotificationService.instance;
+  final _ringtone = CallRingtoneService.instance;
   StreamSubscription? _sub;
+  Timer? _watchdog;
   IncomingCall? _call;
   bool _starting = false;
 
@@ -35,26 +38,46 @@ class _IncomingCallHostState extends State<IncomingCallHost>
   Future<void> _boot() async {
     try {
       await _notifications.init();
+      await _ringtone.init();
       _notifications.onTap = (payload) {
         // Al tocar la notificación, el overlay ya debería mostrarse
         debugPrint('Notificación tocada: $payload');
       };
 
-      final user = await _auth.getCurrentUser();
-      if (user == null || !mounted) return;
+      // Sin usuario no hay escucha de llamadas: reintentar si la red falla
+      var user = await _auth.getCurrentUser();
+      var tries = 0;
+      while (user == null && mounted && tries < 5) {
+        tries++;
+        await Future.delayed(Duration(seconds: 2 * tries));
+        user = await _auth.getCurrentUser();
+      }
+      if (user == null || !mounted) {
+        debugPrint('IncomingCallHost: sin usuario, no se escuchan llamadas');
+        return;
+      }
+
       await _invites.startListening(
         userId: user.$id,
         userName: user.name.isNotEmpty ? user.name : 'Usuario',
       );
+
+      // Vigilar que el lobby siga conectado (Render se duerme / cambia de red)
+      _watchdog = Timer.periodic(const Duration(seconds: 15), (_) {
+        unawaited(_invites.refreshIncoming());
+      });
+
       _sub = _invites.incoming.listen((call) async {
         if (!mounted) return;
         setState(() => _call = call);
         if (call != null) {
+          await _ringtone.start();
           await _notifications.showIncomingCall(
             callerName: call.fromName,
             payload: 'call:${call.roomId}:${call.fromUserId}',
           );
         } else {
+          await _ringtone.stop();
           await _notifications.cancelIncomingCall();
         }
       });
@@ -65,11 +88,18 @@ class _IncomingCallHostState extends State<IncomingCallHost>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Si vuelve a primer plano con llamada pendiente, asegurar overlay
-    if (state == AppLifecycleState.resumed &&
-        _invites.current != null &&
-        mounted) {
+    // Al volver: no pisar ringing; refrescar llamada pendiente
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_onResumed());
+    }
+  }
+
+  Future<void> _onResumed() async {
+    await _invites.refreshIncoming();
+    if (!mounted) return;
+    if (_invites.current != null) {
       setState(() => _call = _invites.current);
+      unawaited(_ringtone.start());
     }
   }
 
@@ -77,6 +107,7 @@ class _IncomingCallHostState extends State<IncomingCallHost>
     final call = _call;
     if (call == null || _starting) return;
     _starting = true;
+    await _ringtone.stop();
     await _notifications.cancelIncomingCall();
     await _invites.acceptCall(call);
     if (!mounted) return;
@@ -109,6 +140,7 @@ class _IncomingCallHostState extends State<IncomingCallHost>
   Future<void> _reject() async {
     final call = _call;
     if (call == null) return;
+    await _ringtone.stop();
     await _notifications.cancelIncomingCall();
     await _invites.rejectCall(call);
     if (mounted) setState(() => _call = null);
@@ -117,7 +149,9 @@ class _IncomingCallHostState extends State<IncomingCallHost>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _watchdog?.cancel();
     _sub?.cancel();
+    unawaited(_ringtone.stop());
     _notifications.cancelIncomingCall();
     _invites.stopListening();
     super.dispose();
