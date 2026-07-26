@@ -9,6 +9,7 @@ import 'package:conecta_lsb/services/sign_detection_service.dart';
 import 'package:conecta_lsb/services/sign_guide.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
+import 'package:conecta_lsb/widgets/hand_points_overlay.dart';
 
 /// Pestaña de traducción: cámara + señas → frase + voz.
 class TranslationTab extends StatefulWidget {
@@ -37,6 +38,8 @@ class _TranslationTabState extends State<TranslationTab> {
   String _sentence = '';
   String _agentSource = 'local';
   DateTime _lastSpeak = DateTime.fromMillisecondsSinceEpoch(0);
+  String _spokenSentence = '';
+  Timer? _speakTimer;
 
   @override
   void initState() {
@@ -53,13 +56,25 @@ class _TranslationTabState extends State<TranslationTab> {
       _sentence = out.sentence;
       _agentSource = out.source;
     });
-    if (out.source == 'gemini') {
+  }
+
+  /// Habla cuando el usuario termina de señar (frase completa, no por trozos).
+  void _scheduleSpeak() {
+    _speakTimer?.cancel();
+    _speakTimer = Timer(const Duration(milliseconds: 850), () async {
+      final out = await _agent.flush();
+      if (!mounted) return;
+      final sentence = out.sentence.trim();
+      if (sentence.isEmpty) return;
       final now = DateTime.now();
-      if (now.difference(_lastSpeak) > const Duration(milliseconds: 900)) {
-        _lastSpeak = now;
-        unawaited(_voice.speak(out.sentence));
+      if (sentence == _spokenSentence &&
+          now.difference(_lastSpeak) < const Duration(seconds: 4)) {
+        return;
       }
-    }
+      _spokenSentence = sentence;
+      _lastSpeak = now;
+      unawaited(_voice.speak(sentence));
+    });
   }
 
   Future<void> _boot() async {
@@ -177,21 +192,19 @@ class _TranslationTabState extends State<TranslationTab> {
         _signsLine = agentOut.signs.join(' → ');
         _sentence = agentOut.sentence;
         _agentSource = agentOut.source;
-        _hint = result.phrase;
+        _hint = SignGuide.labelFor(result.phrase);
       });
 
-      // Leer la frase armada (servidor o TTS local)
-      final now = DateTime.now();
-      if (now.difference(_lastSpeak) > const Duration(milliseconds: 1200)) {
-        _lastSpeak = now;
-        unawaited(_voice.speak(agentOut.sentence));
-      }
+      // Leer recién cuando la frase queda completa (evita cortar cada seña)
+      _scheduleSpeak();
     } finally {
       _busy = false;
     }
   }
 
   Future<void> _clear() async {
+    _speakTimer?.cancel();
+    _spokenSentence = '';
     _agent.clear();
     setState(() {
       _signsLine = '';
@@ -348,6 +361,7 @@ class _TranslationTabState extends State<TranslationTab> {
 
   @override
   void dispose() {
+    _speakTimer?.cancel();
     _agent.latest.removeListener(_onAgentUpdate);
     _camera?.dispose();
     _sign.stop();
@@ -386,6 +400,11 @@ class _TranslationTabState extends State<TranslationTab> {
                                 color: Color(0xff27C7D9),
                               ),
                       ),
+                    ),
+                  if (_ready && _camera != null)
+                    HandPointsOverlay(
+                      frames: _sign.points,
+                      mirror: _isFront,
                     ),
                   Positioned(
                     top: 14,

@@ -8,6 +8,7 @@ import 'package:conecta_lsb/services/settings_service.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
 import 'package:conecta_lsb/services/sign_guide.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
+import 'package:conecta_lsb/widgets/hand_points_overlay.dart';
 
 class AcademyCourse {
   final String id;
@@ -786,7 +787,13 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(20),
               child: _ready && _camera != null
-                  ? CameraCoverPreview(controller: _camera!)
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CameraCoverPreview(controller: _camera!),
+                        HandPointsOverlay(frames: _sign.points),
+                      ],
+                    )
                   : const Center(
                       child: CircularProgressIndicator(
                           color: Color(0xff37C8F2)),

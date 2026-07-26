@@ -12,6 +12,7 @@ import 'package:conecta_lsb/services/sign_detection_service.dart';
 import 'package:conecta_lsb/services/sign_guide.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
+import 'package:conecta_lsb/widgets/hand_points_overlay.dart';
 
 enum CallUserRole { deaf, hearing }
 
@@ -67,6 +68,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   String _statusHint = 'Iniciando cámara...';
   bool _handsVisible = false;
   Timer? _captionHoldTimer;
+  Timer? _signSpeakTimer;
+  String _lastSpokenSign = '';
 
   String _roomId = '';
   StreamSubscription? _captionListen;
@@ -197,18 +200,30 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         return;
       }
 
-      // No await speak: no congelar frames — agente arma frase
+      // Subtítulo al instante; la voz espera a que la frase esté completa
       if (result.phrase.isNotEmpty) {
         final agent =
             await SignLanguageAiAgent.instance.ingestSign(result.phrase);
         if (!mounted) return;
-        unawaited(
-          _emitLocalCaption(agent.sentence, role: 'sign', speak: true),
-        );
+        _showOnScreenCaption(agent.sentence);
+        _scheduleSignSpeak();
       }
     } finally {
       _processing = false;
     }
+  }
+
+  /// Envía y habla la frase de señas cuando el usuario deja de señar.
+  void _scheduleSignSpeak() {
+    _signSpeakTimer?.cancel();
+    _signSpeakTimer = Timer(const Duration(milliseconds: 850), () async {
+      final agent = await SignLanguageAiAgent.instance.flush();
+      if (!mounted) return;
+      final sentence = agent.sentence.trim();
+      if (sentence.isEmpty || sentence == _lastSpokenSign) return;
+      _lastSpokenSign = sentence;
+      unawaited(_emitLocalCaption(sentence, role: 'sign', speak: true));
+    });
   }
 
   void _showOnScreenCaption(String text, {bool fromRemote = false}) {
@@ -391,6 +406,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     _timer?.cancel();
     _ringTimeout?.cancel();
     _captionHoldTimer?.cancel();
+    _signSpeakTimer?.cancel();
     _captionListen?.cancel();
     _peerListen?.cancel();
     _callEventListen?.cancel();
@@ -434,6 +450,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                     : const CircularProgressIndicator(color: Color(0xff37C8F2)),
               ),
             ),
+
+          if (_ready && !_isVideoOff && _camera != null)
+            HandPointsOverlay(frames: _sign.points, mirror: _isFront),
 
           // Gradiente inferior para leer subtítulos
           Positioned(
@@ -733,10 +752,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text(
+                    const Text(
                       SignGuide.liveHint,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: Color(0xff37C8F2),
                         fontSize: 11,
                         fontWeight: FontWeight.w600,

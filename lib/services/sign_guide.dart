@@ -8,14 +8,14 @@ class SignGuide {
   /// Pasos que coinciden con cada panel de la imagen.
   static const Map<String, List<String>> steps = {
     'Hola': [
-      'Como en la guía (panel HOLA): mano abierta BIEN ARRIBA, junto a la cabeza.',
+      'Como en la guía (panel HOLA): mano abierta a la altura de los ojos o más arriba, junto a la cabeza.',
       'Palma al frente, dedos abiertos.',
-      'Muévela de LADO a LADO (flecha horizontal) 1–2 segundos.',
+      'Muévela de LADO a LADO AMPLIO (flecha horizontal) 1 segundo.',
     ],
     'Cómo': [
       'Como en la guía (panel ¿CÓMO ESTÁS?): mano cerca de la barbilla / mejilla.',
       'Dedos juntos, un poco curvados hacia la cara.',
-      'Movimiento CORTO de lado a lado (flecha pequeña).',
+      'Movimiento CORTO de lado a lado (flecha pequeña, mucho menos que Hola).',
       'La app lo convierte en la frase: ¿Cómo estás?',
     ],
     'Yo': [
@@ -96,5 +96,6 @@ class SignGuide {
 
   /// Pistas cortas para subtítulos / status en vivo.
   static const liveHint =
-      'Guía: Hola=arriba+vaivén · Cómo=cara · Yo=pecho · Bien=quieto · Sí=↑↓ · No=↔';
+      'Puntos verdes = tus manos detectadas · Hola=arriba+vaivén amplio · '
+      'Cómo=cara+vaivén corto · Yo=pecho · Bien=quieto · Sí=↑↓ · No=↔';
 }

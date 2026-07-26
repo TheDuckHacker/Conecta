@@ -88,7 +88,7 @@ class SignLanguageAiAgent {
     if (sign.isEmpty) return snapshot;
 
     final now = DateTime.now();
-    if (now.difference(_lastSignAt) > const Duration(seconds: 4) &&
+    if (now.difference(_lastSignAt) > const Duration(seconds: 6) &&
         _buffer.isNotEmpty) {
       _buffer.clear();
     }
@@ -121,7 +121,7 @@ class SignLanguageAiAgent {
   void _scheduleRemoteCompose() {
     _remoteDebounce?.cancel();
     final gen = ++_composeGen;
-    _remoteDebounce = Timer(const Duration(milliseconds: 700), () {
+    _remoteDebounce = Timer(const Duration(milliseconds: 420), () {
       if (gen != _composeGen) return;
       _inflight = _composeRemoteNow();
     });
@@ -240,65 +240,143 @@ class SignLanguageAiAgent {
     }
   }
 
+  /// Arma la frase respetando el ORDEN de las señas, por tramos:
+  /// [Hola, Cómo] → "Hola, ¿cómo estás?"
+  /// [Hola, Cómo, Yo, Bien] → "Hola, ¿cómo estás? Yo estoy bien."
   String _composeLocal(List<String> signs) {
     if (signs.isEmpty) return '';
-    if (signs.length == 1) {
-      if (signs.first == 'Cómo') return '¿Cómo estás?';
-      return signs.first;
+
+    const estados = {
+      'Bien': 'bien',
+      'Mal': 'mal',
+    };
+    const acciones = {
+      'Comer': 'comer',
+      'Beber': 'beber',
+      'Dormir': 'dormir',
+    };
+
+    final segments = <String>[];
+    var i = 0;
+
+    String? peek(int offset) =>
+        i + offset < signs.length ? signs[i + offset] : null;
+
+    while (i < signs.length) {
+      final sign = signs[i];
+      final next = peek(1);
+
+      switch (sign) {
+        case 'Hola':
+          segments.add('Hola');
+          i++;
+        case 'Adiós':
+          segments.add('Adiós');
+          i++;
+        case 'Cómo':
+        case 'Estás':
+          segments.add('¿cómo estás?');
+          i++;
+          if (peek(0) == 'Estás') i++;
+        case 'Yo':
+          if (next != null && estados.containsKey(next)) {
+            segments.add('yo estoy ${estados[next]}');
+            i += 2;
+          } else if (next != null && acciones.containsKey(next)) {
+            segments.add('yo quiero ${acciones[next]}');
+            i += 2;
+          } else if (next == 'Dolor') {
+            segments.add('yo tengo dolor');
+            i += 2;
+          } else if (next == 'Ayuda') {
+            segments.add('yo necesito ayuda');
+            i += 2;
+          } else if (next == 'Doctor') {
+            segments.add('yo necesito un doctor');
+            i += 2;
+          } else {
+            segments.add('yo');
+            i++;
+          }
+        case 'Bien':
+        case 'Mal':
+          segments.add('estoy ${estados[sign]}');
+          i++;
+        case 'Sí':
+          segments.add('sí');
+          i++;
+        case 'No':
+          segments.add('no');
+          i++;
+        case 'Gracias':
+          segments.add('gracias');
+          i++;
+        case 'Por favor':
+          segments.add('por favor');
+          i++;
+        case 'Dolor':
+          segments.add(next == 'Doctor'
+              ? 'tengo dolor, necesito un doctor'
+              : 'tengo dolor');
+          i += next == 'Doctor' ? 2 : 1;
+        case 'Ayuda':
+          segments.add(next == 'Doctor'
+              ? 'necesito ayuda del doctor'
+              : 'necesito ayuda');
+          i += next == 'Doctor' ? 2 : 1;
+        case 'Doctor':
+          segments.add('necesito un doctor');
+          i++;
+        case 'Comer':
+        case 'Beber':
+        case 'Dormir':
+          segments.add('quiero ${acciones[sign]}');
+          i++;
+        case 'Hoy':
+          segments.add('hoy');
+          i++;
+        case 'Mamá':
+        case 'Papá':
+          segments.add('es mi ${sign.toLowerCase()}');
+          i++;
+        default:
+          segments.add(sign.toLowerCase());
+          i++;
+      }
     }
 
-    final s = List<String>.from(signs);
-    final set = s.toSet();
+    return _joinSegments(segments);
+  }
 
-    // ¿Cómo estás?
-    if (set.contains('Cómo') ||
-        (set.contains('Cómo') && (set.contains('Estás') || set.contains('Bien'))) ||
-        (set.contains('Hola') && set.contains('Cómo'))) {
-      return '¿Cómo estás?';
-    }
-    if (set.contains('Hola') && set.contains('Bien') && s.length <= 3) {
-      return 'Hola, ¿cómo estás?';
-    }
+  /// Une tramos con puntuación natural: "Hola, ¿cómo estás? Yo estoy bien."
+  String _joinSegments(List<String> segments) {
+    if (segments.isEmpty) return '';
+    final out = StringBuffer();
+    var startOfSentence = true;
 
-    if (set.contains('Yo') && set.contains('Bien')) return 'Yo estoy bien';
-    if (set.contains('Yo') && set.contains('Mal')) return 'Yo estoy mal';
-    if (set.contains('Yo') && set.contains('Dolor')) return 'Yo tengo dolor';
-    if (set.contains('Yo') && set.contains('Ayuda')) return 'Yo necesito ayuda';
-    if (set.contains('Dolor') && set.contains('Doctor')) {
-      return 'Tengo dolor, necesito un doctor';
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      final isQuestion = seg.endsWith('?');
+
+      if (startOfSentence) {
+        seg = seg.startsWith('¿')
+            ? '¿${seg[1].toUpperCase()}${seg.substring(2)}'
+            : seg[0].toUpperCase() + seg.substring(1);
+      } else {
+        out.write(', ');
+      }
+      out.write(seg);
+
+      final last = i == segments.length - 1;
+      if (isQuestion) {
+        if (!last) out.write(' ');
+        startOfSentence = true;
+      } else if (last) {
+        out.write('.');
+      } else {
+        startOfSentence = false;
+      }
     }
-    if (set.contains('Ayuda') && set.contains('Doctor')) {
-      return 'Necesito ayuda del doctor';
-    }
-    if (set.contains('Gracias') && set.contains('Por favor')) {
-      return 'Por favor, gracias';
-    }
-    if (s.first == 'Hola') {
-      final rest = s.skip(1).where((e) => e != 'Hola').toList();
-      if (rest.isEmpty) return 'Hola';
-      if (rest.contains('Bien')) return 'Hola, estoy bien';
-      if (rest.contains('Mal')) return 'Hola, estoy mal';
-      return 'Hola, ${rest.join(' ').toLowerCase()}';
-    }
-    if (s.first == 'Adiós' || s.last == 'Adiós') return 'Adiós';
-    if (set.contains('Mamá') || set.contains('Papá')) {
-      final who = set.contains('Mamá') ? 'mamá' : 'papá';
-      if (set.contains('Hoy')) return 'Hoy veo a mi $who';
-      return 'Es mi $who';
-    }
-    if (set.contains('Comer') || set.contains('Beber') || set.contains('Dormir')) {
-      final action = s.firstWhere(
-        (e) => e == 'Comer' || e == 'Beber' || e == 'Dormir',
-      );
-      final verb = action.toLowerCase();
-      if (set.contains('Yo')) return 'Yo quiero $verb';
-      if (set.contains('Hoy')) return 'Hoy quiero $verb';
-      return 'Quiero $verb';
-    }
-    if (set.contains('Hoy') && s.length >= 2) {
-      final rest = s.where((e) => e != 'Hoy').join(' ').toLowerCase();
-      return 'Hoy $rest';
-    }
-    return '${s.join(', ')}.';
+    return out.toString();
   }
 }

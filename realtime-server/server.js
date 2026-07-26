@@ -49,38 +49,109 @@ app.get('/', (_req, res) => {
 });
 
 const LSB_VOCAB = [
-  'Hola', 'Sí', 'No', 'Bien', 'Mal', 'Yo', 'Gracias', 'Por favor',
-  'Dolor', 'Ayuda', 'Doctor', 'Hoy', 'Mamá', 'Papá', 'Comer', 'Beber',
-  'Dormir', 'Adiós',
+  'Hola', 'Cómo', 'Estás', 'Sí', 'No', 'Bien', 'Mal', 'Yo', 'Gracias',
+  'Por favor', 'Dolor', 'Ayuda', 'Doctor', 'Hoy', 'Mamá', 'Papá', 'Comer',
+  'Beber', 'Dormir', 'Adiós',
 ];
 
-/** Fallback local si Gemini no está o falla. */
+const ESTADOS = { Bien: 'bien', Mal: 'mal' };
+const ACCIONES = { Comer: 'comer', Beber: 'beber', Dormir: 'dormir' };
+
+/**
+ * Fallback local si Gemini no está o falla. Respeta el ORDEN de las señas:
+ * [Hola, Cómo, Yo, Bien] → "Hola, ¿cómo estás? Yo estoy bien."
+ */
 function composeLocal(signs) {
   if (!signs.length) return '';
-  if (signs.length === 1) return signs[0];
-  const set = new Set(signs);
-  if (set.has('Yo') && set.has('Bien')) return 'Yo estoy bien';
-  if (set.has('Yo') && set.has('Mal')) return 'Yo estoy mal';
-  if (set.has('Yo') && set.has('Dolor')) return 'Yo tengo dolor';
-  if (set.has('Yo') && set.has('Ayuda')) return 'Yo necesito ayuda';
-  if (set.has('Dolor') && set.has('Doctor')) return 'Tengo dolor, necesito un doctor';
-  if (set.has('Ayuda') && set.has('Doctor')) return 'Necesito ayuda del doctor';
-  if (signs[0] === 'Hola') {
-    const rest = signs.slice(1);
-    if (rest.length === 1 && rest[0] === 'Bien') return 'Hola, estoy bien';
-    return rest.length ? `Hola, ${rest.join(' ').toLowerCase()}` : 'Hola';
+  const segments = [];
+  let i = 0;
+
+  while (i < signs.length) {
+    const sign = signs[i];
+    const next = signs[i + 1];
+
+    if (sign === 'Hola' || sign === 'Adiós') {
+      segments.push(sign);
+      i += 1;
+    } else if (sign === 'Cómo' || sign === 'Estás') {
+      segments.push('¿cómo estás?');
+      i += signs[i + 1] === 'Estás' ? 2 : 1;
+    } else if (sign === 'Yo') {
+      if (ESTADOS[next]) {
+        segments.push(`yo estoy ${ESTADOS[next]}`);
+        i += 2;
+      } else if (ACCIONES[next]) {
+        segments.push(`yo quiero ${ACCIONES[next]}`);
+        i += 2;
+      } else if (next === 'Dolor') {
+        segments.push('yo tengo dolor');
+        i += 2;
+      } else if (next === 'Ayuda') {
+        segments.push('yo necesito ayuda');
+        i += 2;
+      } else if (next === 'Doctor') {
+        segments.push('yo necesito un doctor');
+        i += 2;
+      } else {
+        segments.push('yo');
+        i += 1;
+      }
+    } else if (ESTADOS[sign]) {
+      segments.push(`estoy ${ESTADOS[sign]}`);
+      i += 1;
+    } else if (ACCIONES[sign]) {
+      segments.push(`quiero ${ACCIONES[sign]}`);
+      i += 1;
+    } else if (sign === 'Dolor') {
+      segments.push(next === 'Doctor' ? 'tengo dolor, necesito un doctor' : 'tengo dolor');
+      i += next === 'Doctor' ? 2 : 1;
+    } else if (sign === 'Ayuda') {
+      segments.push(next === 'Doctor' ? 'necesito ayuda del doctor' : 'necesito ayuda');
+      i += next === 'Doctor' ? 2 : 1;
+    } else if (sign === 'Doctor') {
+      segments.push('necesito un doctor');
+      i += 1;
+    } else if (sign === 'Mamá' || sign === 'Papá') {
+      segments.push(`es mi ${sign.toLowerCase()}`);
+      i += 1;
+    } else {
+      segments.push(String(sign).toLowerCase());
+      i += 1;
+    }
   }
-  if (set.has('Comer') || set.has('Beber') || set.has('Dormir')) {
-    const action = signs.find((e) => e === 'Comer' || e === 'Beber' || e === 'Dormir');
-    const verb = String(action).toLowerCase();
-    if (set.has('Yo')) return `Yo quiero ${verb}`;
-    if (set.has('Hoy')) return `Hoy quiero ${verb}`;
-    return `Quiero ${verb}`;
-  }
-  if (set.has('Hoy') && signs.length >= 2) {
-    return `Hoy ${signs.filter((e) => e !== 'Hoy').join(' ').toLowerCase()}`;
-  }
-  return `${signs.join(', ')}.`;
+
+  return joinSegments(segments);
+}
+
+function joinSegments(segments) {
+  if (!segments.length) return '';
+  let out = '';
+  let startOfSentence = true;
+
+  segments.forEach((raw, index) => {
+    let seg = raw;
+    const isQuestion = seg.endsWith('?');
+    if (startOfSentence) {
+      seg = seg.startsWith('¿')
+        ? `¿${seg[1].toUpperCase()}${seg.slice(2)}`
+        : seg[0].toUpperCase() + seg.slice(1);
+    } else {
+      out += ', ';
+    }
+    out += seg;
+
+    const last = index === segments.length - 1;
+    if (isQuestion) {
+      if (!last) out += ' ';
+      startOfSentence = true;
+    } else if (last) {
+      out += '.';
+    } else {
+      startOfSentence = false;
+    }
+  });
+
+  return out;
 }
 
 function cleanSentence(text) {
@@ -125,6 +196,10 @@ app.post('/ai/compose', async (req, res) => {
     'Convierte tokens de señas en UNA frase natural, corta y hablable.',
     'Reglas: solo la frase; sin comillas, sin markdown, sin explicación.',
     'No inventes señas que no estén en la secuencia.',
+    'Respeta el orden de las señas y usa signos de pregunta cuando toque.',
+    'Ejemplos: "Hola → Cómo" = Hola, ¿cómo estás?; ' +
+      '"Hola → Cómo → Yo → Bien" = Hola, ¿cómo estás? Yo estoy bien.; ' +
+      '"Yo → Dolor" = Yo tengo dolor.',
     `Vocabulario frecuente: ${LSB_VOCAB.join(', ')}.`,
     `Locale: ${locale}.`,
     previous ? `Frase anterior (refina si encaja): ${previous}` : '',

@@ -71,7 +71,7 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
       if (!mounted) return;
       setState(() {
         _messages.add(
-          _Bubble(
+          const _Bubble(
             text:
                 'No pude contactar al servidor. Revisa tu internet. '
                 'Mientras: Academia → Cómo empezar muestra los pasos de cada seña.',
