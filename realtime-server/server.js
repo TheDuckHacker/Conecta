@@ -31,6 +31,7 @@ app.get('/health', (_req, res) => {
     uptime: process.uptime(),
     ai: Boolean(process.env.GEMINI_API_KEY),
     tts: Boolean(process.env.ELEVENLABS_API_KEY),
+    zavu: Boolean(process.env.ZAVU_API_KEY),
   });
 });
 
@@ -42,6 +43,8 @@ app.get('/', (_req, res) => {
     health: '/health',
     ai: '/ai/compose',
     tts: '/tts',
+    help: '/agent/help',
+    zavu: '/agent/zavu/status',
   });
 });
 
@@ -217,6 +220,178 @@ app.post('/tts', async (req, res) => {
     return res.send(buf);
   } catch (e) {
     console.error('TTS', e);
+    return res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+/** Sesiones del agente de ayuda (en memoria). */
+const helpSessions = new Map();
+
+const HELP_SYSTEM = [
+  'Eres el asistente de ayuda de Conecta LSB (app de Lengua de Señas Boliviana).',
+  'Responde en español, claro, corto y amable (máx. 6 líneas).',
+  'Ayudas con: Traducción (cámara), Academia LSB (pasos de señas), chats, videollamada y voz.',
+  'Señas que la cámara entiende (simplificadas):',
+  '- Hola: mano BIEN ARRIBA junto a la cabeza, vaivén lado a lado.',
+  '- ¿Cómo estás?: mano cerca de la cara, movimiento corto → la app arma la frase.',
+  '- Yo: mano en el pecho quieta. Bien: pecho quieto. Sí: pecho arriba/abajo. No: pecho lado a lado.',
+  '- Gracias: cerca de la barbilla quieta. Adiós: media altura con vaivén suave.',
+  'Si preguntan por Zavu/WhatsApp: pueden continuar la ayuda por WhatsApp desde el botón en la app.',
+  'Si no sabes algo de la app, dilo y sugiere Academia → Cómo empezar.',
+].join('\n');
+
+function helpLocalReply(message) {
+  const m = String(message || '').toLowerCase();
+  if (m.includes('hola') || m.includes('saludo')) {
+    return 'Para decir Hola: levanta la mano abierta BIEN ARRIBA (junto a la cabeza) y muévela de lado a lado 1–2 segundos. Luego abre Academia → Saludos para practicar con pasos.';
+  }
+  if (m.includes('cómo estás') || m.includes('como estas') || m.includes('cómo')) {
+    return 'Para ¿Cómo estás?: acerca la mano a la cara (mejilla/barbilla) y haz un movimiento corto de lado a lado. En Academia la seña se llama “Cómo”.';
+  }
+  if (m.includes('academia') || m.includes('aprender') || m.includes('práctica')) {
+    return 'En Academia LSB: 1) Toca “Cómo empezar”. 2) Elige un curso. 3) Lee los pasos numerados. 4) Toca “Practicar con cámara”.';
+  }
+  if (m.includes('whatsapp') || m.includes('zavu')) {
+    return 'Puedes seguir chateando con el agente por WhatsApp (Zavu) con el botón “Continuar en WhatsApp” en esta pantalla, si el servidor tiene Zavu configurado.';
+  }
+  if (m.includes('traduc') || m.includes('cámara') || m.includes('camara')) {
+    return 'En Traducción: permite la cámara, buena luz, pecho visible. Usa el botón del libro para ver la guía de señas. Las palabras se arman en frase (IA en servidor o local).';
+  }
+  return 'Puedo ayudarte con Hola, ¿Cómo estás?, Academia, Traducción y WhatsApp (Zavu). Pregunta, por ejemplo: “¿cómo hago Hola?” o “¿cómo uso la Academia?”.';
+}
+
+async function geminiHelp(history, userMessage) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+  const contents = [
+    { role: 'user', parts: [{ text: HELP_SYSTEM }] },
+    { role: 'model', parts: [{ text: 'Entendido. Ayudaré con Conecta LSB de forma clara y breve.' }] },
+    ...history.slice(-8).map((h) => ({
+      role: h.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: h.text }],
+    })),
+    { role: 'user', parts: [{ text: userMessage }] },
+  ];
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents,
+      generationConfig: { temperature: 0.4, maxOutputTokens: 280 },
+    }),
+  });
+  const data = await r.json();
+  if (!r.ok) {
+    console.error('Gemini help', r.status, data);
+    return null;
+  }
+  const text =
+    data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+  return String(text).trim() || null;
+}
+
+/**
+ * Agente de ayuda in-app (Gemini + fallback local).
+ * POST /agent/help { "message": "...", "sessionId"?: "..." }
+ */
+app.post('/agent/help', async (req, res) => {
+  const message = String(req.body?.message || '').trim();
+  if (!message) return res.status(400).json({ error: 'message requerido' });
+  const sessionId = String(req.body?.sessionId || randomUUID()).trim();
+  if (!helpSessions.has(sessionId)) helpSessions.set(sessionId, []);
+  const history = helpSessions.get(sessionId);
+
+  let reply = null;
+  let source = 'local';
+  try {
+    reply = await geminiHelp(history, message);
+    if (reply) source = 'gemini';
+  } catch (e) {
+    console.error('help agent', e);
+  }
+  if (!reply) {
+    reply = helpLocalReply(message);
+    source = 'local';
+  }
+
+  history.push({ role: 'user', text: message });
+  history.push({ role: 'assistant', text: reply });
+  if (history.length > 24) history.splice(0, history.length - 24);
+
+  return res.json({
+    sessionId,
+    reply,
+    source,
+    zavu: {
+      configured: Boolean(process.env.ZAVU_API_KEY),
+      whatsappNumber: process.env.ZAVU_WHATSAPP_NUMBER || '',
+    },
+  });
+});
+
+/**
+ * Estado Zavu
+ * GET /agent/zavu/status
+ */
+app.get('/agent/zavu/status', (_req, res) => {
+  const number = String(process.env.ZAVU_WHATSAPP_NUMBER || '').replace(/\D/g, '');
+  res.json({
+    configured: Boolean(process.env.ZAVU_API_KEY),
+    senderId: Boolean(process.env.ZAVU_SENDER_ID),
+    whatsappNumber: number,
+    waMe: number ? `https://wa.me/${number}` : '',
+    docs: 'https://www.zavu.dev/es',
+  });
+});
+
+/**
+ * Enviar mensaje vía Zavu (WhatsApp/SMS routing).
+ * POST /agent/zavu/send { "to": "+591...", "text": "..." }
+ * Docs: https://www.zavu.dev/es
+ */
+app.post('/agent/zavu/send', async (req, res) => {
+  const apiKey = process.env.ZAVU_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({
+      error: 'ZAVU_API_KEY no configurada en Render',
+      docs: 'https://www.zavu.dev/es',
+    });
+  }
+  const to = String(req.body?.to || '').trim();
+  const text = String(req.body?.text || '').trim();
+  if (!to || !text) {
+    return res.status(400).json({ error: 'to y text requeridos' });
+  }
+
+  const body = { to, text };
+  if (process.env.ZAVU_SENDER_ID) {
+    body.from = process.env.ZAVU_SENDER_ID;
+  }
+
+  try {
+    const r = await fetch('https://api.zavu.dev/v1/messages', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      console.error('Zavu send', r.status, data);
+      return res.status(502).json({
+        error: 'Zavu no pudo enviar',
+        detail: data,
+        docs: 'https://docs.zavu.dev',
+      });
+    }
+    return res.json({ ok: true, provider: 'zavu', data });
+  } catch (e) {
+    console.error('Zavu', e);
     return res.status(500).json({ error: String(e.message || e) });
   }
 });

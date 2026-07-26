@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:conecta_lsb/screens/login.dart';
 import 'package:conecta_lsb/screens/profile.dart';
+import 'package:conecta_lsb/screens/help_agent_screen.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/avatar_service.dart';
 import 'package:conecta_lsb/services/call_invite_service.dart';
@@ -198,6 +199,17 @@ class _SettingsTabState extends State<SettingsTab> {
                 context,
                 MaterialPageRoute(builder: (_) => const ProfileScreen()),
               ).then((_) => _loadProfile());
+            },
+          ),
+          _item(
+            icon: Icons.smart_toy_rounded,
+            title: 'Agente de ayuda (Zavu)',
+            subtitle: 'Chat in-app y WhatsApp',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const HelpAgentScreen()),
+              );
             },
           ),
           const SizedBox(height: 16),
