@@ -475,6 +475,66 @@ app.post('/agent/zavu/send', async (req, res) => {
 /** roomId -> Map(userId -> { ws, role, joinedAt }) */
 const rooms = new Map();
 
+/** Invites pendientes: toUserId -> { fromUserId, fromName, roomId, at } */
+const pendingInvites = new Map();
+const PENDING_TTL_MS = 60_000;
+
+function storePendingInvite(toUserId, invite) {
+  pendingInvites.set(toUserId, { ...invite, at: Date.now() });
+  // Limpieza automática
+  setTimeout(() => {
+    const cur = pendingInvites.get(toUserId);
+    if (cur && cur.roomId === invite.roomId && Date.now() - cur.at >= PENDING_TTL_MS) {
+      pendingInvites.delete(toUserId);
+    }
+  }, PENDING_TTL_MS + 500);
+}
+
+function deliverInvite(toUserId, envelope) {
+  const target = `lobby:${toUserId}`;
+  const lobby = rooms.get(target);
+  let delivered = 0;
+  if (lobby) {
+    const raw = JSON.stringify(envelope);
+    for (const client of lobby.values()) {
+      if (client.ws.readyState === 1) {
+        client.ws.send(raw);
+        delivered++;
+      }
+    }
+  }
+  // Guardar siempre: si el lobby se conecta 1 s después, lo recibe al join
+  storePendingInvite(toUserId, {
+    fromUserId: envelope.fromUserId,
+    fromName: envelope.fromName,
+    roomId: envelope.roomId,
+    callRoomId: envelope.callRoomId || envelope.roomId,
+  });
+  return delivered;
+}
+
+function flushPendingInvite(toUserId, ws) {
+  const pending = pendingInvites.get(toUserId);
+  if (!pending) return;
+  if (Date.now() - pending.at > PENDING_TTL_MS) {
+    pendingInvites.delete(toUserId);
+    return;
+  }
+  try {
+    ws.send(
+      JSON.stringify({
+        type: 'invite',
+        fromUserId: pending.fromUserId,
+        fromName: pending.fromName,
+        roomId: pending.roomId,
+        callRoomId: pending.callRoomId || pending.roomId,
+        at: new Date().toISOString(),
+        pending: true,
+      }),
+    );
+  } catch (_) {}
+}
+
 function getRoom(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, new Map());
   return rooms.get(roomId);
@@ -504,6 +564,36 @@ function leaveRoom(roomId, userId) {
   });
   if (room.size === 0) rooms.delete(roomId);
 }
+
+/** HTTP: avisar llamada aunque el WS del llamante aún no esté listo */
+app.post('/call/invite', (req, res) => {
+  try {
+    const toUserId = String(req.body?.toUserId || '').trim();
+    const fromUserId = String(req.body?.fromUserId || '').trim();
+    const fromName = String(req.body?.fromName || 'Contacto').trim();
+    const roomId = String(req.body?.roomId || req.body?.callRoomId || '').trim();
+    if (!toUserId || !fromUserId || !roomId) {
+      return res.status(400).json({ error: 'toUserId, fromUserId y roomId requeridos' });
+    }
+    const envelope = {
+      type: 'invite',
+      fromUserId,
+      fromName,
+      roomId,
+      callRoomId: roomId,
+      at: new Date().toISOString(),
+    };
+    const delivered = deliverInvite(toUserId, envelope);
+    return res.json({
+      ok: true,
+      delivered,
+      pending: true,
+      lobbyOnline: delivered > 0,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: String(e.message || e) });
+  }
+});
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -568,6 +658,11 @@ wss.on('connection', (ws) => {
           peers,
         }),
       );
+
+      // Si hay una llamada pendiente para este lobby, entregarla ya
+      if (roomId.startsWith('lobby:')) {
+        flushPendingInvite(userId, ws);
+      }
 
       broadcast(
         roomId,
@@ -664,30 +759,27 @@ wss.on('connection', (ws) => {
 
     // Invitación de llamada → lobby personal del destinatario
     if (type === 'invite') {
+      const toUserId = String(msg.toUserId || '').trim();
       const target =
         String(msg.targetLobby || '').trim() ||
-        (msg.toUserId ? `lobby:${msg.toUserId}` : '');
+        (toUserId ? `lobby:${toUserId}` : '');
       const fromUserId = String(msg.fromUserId || msg.userId || meta.userId || '').trim();
       const roomId = String(msg.callRoomId || msg.roomId || '').trim();
       const fromName = String(msg.fromName || 'Contacto').trim();
-      if (!target || !fromUserId || !roomId) return;
+      const destUser =
+        toUserId ||
+        (target.startsWith('lobby:') ? target.slice('lobby:'.length) : '');
+      if (!destUser || !fromUserId || !roomId) return;
 
-      const envelope = {
+      deliverInvite(destUser, {
         type: 'invite',
         fromUserId,
         fromName,
         roomId,
-        toUserId: String(msg.toUserId || '').trim(),
+        callRoomId: roomId,
+        toUserId: destUser,
         at: new Date().toISOString(),
-      };
-
-      const lobby = rooms.get(target);
-      if (lobby) {
-        const raw = JSON.stringify(envelope);
-        for (const client of lobby.values()) {
-          if (client.ws.readyState === 1) client.ws.send(raw);
-        }
-      }
+      });
       return;
     }
 

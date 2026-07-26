@@ -42,6 +42,8 @@ class CallInviteService {
   }) async {
     await stopListening();
     _myUserId = userId;
+    // Por si quedó pegado de una llamada anterior en esta sesión
+    busyInCall = false;
 
     try {
       _sub = realtime.subscribe([
@@ -63,9 +65,9 @@ class CallInviteService {
       debugPrint('CallInvite realtime: $e');
     }
 
-    // Respaldo por sondeo: el Realtime de Appwrite falla a veces en el cliente.
+    // Sondeo rápido: Appwrite Realtime falla a menudo en el cliente.
     _poll = Timer.periodic(
-      const Duration(milliseconds: 1500),
+      const Duration(milliseconds: 800),
       (_) => _pollStatus(),
     );
 
@@ -149,7 +151,14 @@ class CallInviteService {
     final same = _last != null &&
         _last!.fromUserId == call.fromUserId &&
         _last!.roomId == call.roomId;
-    if (same) return;
+    if (same) {
+      // Refrescar marca de tiempo para que el TTL no lo borre
+      _lastRingAt = DateTime.now();
+      return;
+    }
+    debugPrint(
+      'Incoming call: ${call.fromName} (${call.fromUserId}) room=${call.roomId}',
+    );
     _last = call;
     _lastRingAt = DateTime.now();
     _incomingController.add(call);
@@ -211,6 +220,15 @@ class CallInviteService {
       roomId: roomId,
     );
 
+    // 4) Invite HTTP: el servidor lo guarda y lo entrega aunque el lobby
+    // del otro se conecte un segundo después (fixea el bug de “ambos online”).
+    final httpSent = await _calls.postInviteHttp(
+      toUserId: calleeId,
+      fromUserId: callerId,
+      fromName: callerName.isEmpty ? 'Contacto' : callerName,
+      roomId: roomId,
+    );
+
     // Reintento WS un segundo después (por si el lobby recién despertó)
     Future.delayed(const Duration(seconds: 1), () {
       _calls.sendInvite(
@@ -219,9 +237,15 @@ class CallInviteService {
         fromName: callerName.isEmpty ? 'Contacto' : callerName,
         roomId: roomId,
       );
+      unawaited(_calls.postInviteHttp(
+        toUserId: calleeId,
+        fromUserId: callerId,
+        fromName: callerName.isEmpty ? 'Contacto' : callerName,
+        roomId: roomId,
+      ));
     });
 
-    if (!statusOk && !wsSent) {
+    if (!statusOk && !wsSent && !httpSent) {
       throw Exception(
         'No se pudo avisar al contacto. '
         'Revisa internet y que el otro tenga Conecta abierta. '
@@ -232,7 +256,7 @@ class CallInviteService {
     if (!statusOk) {
       debugPrint(
         'startOutgoingCall: status Appwrite falló ($statusError); '
-        'invite WS enviado=$wsSent',
+        'invite WS=$wsSent HTTP=$httpSent',
       );
     }
 
@@ -276,6 +300,12 @@ class CallInviteService {
       fromName: name,
       roomId: roomId,
     );
+    unawaited(_calls.postInviteHttp(
+      toUserId: calleeId,
+      fromUserId: callerId,
+      fromName: name,
+      roomId: roomId,
+    ));
   }
 
   Future<void> acceptCall(IncomingCall call) async {

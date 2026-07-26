@@ -26,6 +26,11 @@ class RealtimeConfig {
     final base = httpBase.trim().replaceAll(RegExp(r'/$'), '');
     return Uri.parse('$base/health');
   }
+
+  static Uri get inviteUri {
+    final base = httpBase.trim().replaceAll(RegExp(r'/$'), '');
+    return Uri.parse('$base/call/invite');
+  }
 }
 
 /// Sala de videollamada + lobby personal para recibir llamadas.
@@ -99,9 +104,12 @@ class CallService {
     required String userId,
     required void Function(Map<String, dynamic>) onInvite,
   }) async {
+    // IMPORTANTE: primero desconectar, LUEGO asignar callback.
+    // Antes se asignaba _onInvite y disconnectLobby(reconnect:false) lo
+    // ponía en null → las invitaciones llegaban por WS pero se ignoraban.
+    await disconnectLobby(reconnect: false);
     _lobbyUserId = userId;
     _onInvite = onInvite;
-    await disconnectLobby(reconnect: false);
 
     final ready = Completer<void>();
     _lobbyReady = ready;
@@ -120,6 +128,9 @@ class CallService {
               if (!ready.isCompleted) ready.complete();
             }
             if (type == 'invite') {
+              debugPrint(
+                'Lobby invite de ${msg['fromName']} room=${msg['roomId']}',
+              );
               _onInvite?.call(msg);
               _callEventController.add(msg);
             } else if (type == 'call_response') {
@@ -149,6 +160,7 @@ class CallService {
       _lobbyPing = Timer.periodic(const Duration(seconds: 25), (_) {
         _lobbySend({'type': 'ping'});
       });
+      debugPrint('Lobby listo para $userId');
     } catch (e) {
       debugPrint('Lobby connect failed: $e');
       if (!ready.isCompleted) ready.completeError(e);
@@ -218,6 +230,36 @@ class CallService {
       debugPrint('sendInvite: sin canal WS (lobby ni sala)');
     }
     return sent;
+  }
+
+  /// Aviso HTTP: el servidor guarda el invite y lo entrega al lobby
+  /// (incluso si el destinatario se conecta 1–2 s después).
+  Future<bool> postInviteHttp({
+    required String toUserId,
+    required String fromUserId,
+    required String fromName,
+    required String roomId,
+  }) async {
+    try {
+      await wakeServer();
+      final res = await http
+          .post(
+            RealtimeConfig.inviteUri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'toUserId': toUserId,
+              'fromUserId': fromUserId,
+              'fromName': fromName,
+              'roomId': roomId,
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+      debugPrint('postInviteHttp ${res.statusCode} ${res.body}');
+      return res.statusCode >= 200 && res.statusCode < 300;
+    } catch (e) {
+      debugPrint('postInviteHttp: $e');
+      return false;
+    }
   }
 
   void sendCallResponse({
