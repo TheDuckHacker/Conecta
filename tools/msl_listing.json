@@ -1,0 +1,162 @@
+[
+  {
+    "name": ".gitignore",
+    "path": ".gitignore",
+    "sha": "547d05188a1ee0362875a74c95417a34bec75135",
+    "size": 1778,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/.gitignore?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/.gitignore",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/547d05188a1ee0362875a74c95417a34bec75135",
+    "download_url": "https://raw.githubusercontent.com/armandobecerril/MSL-150-Dataset/main/.gitignore",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/.gitignore?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/547d05188a1ee0362875a74c95417a34bec75135",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/.gitignore"
+    }
+  },
+  {
+    "name": "CITATION.cff",
+    "path": "CITATION.cff",
+    "sha": "6c43864863411bcf1dde4795583f49ff2e9a875e",
+    "size": 1982,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/CITATION.cff?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/CITATION.cff",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/6c43864863411bcf1dde4795583f49ff2e9a875e",
+    "download_url": "https://raw.githubusercontent.com/armandobecerril/MSL-150-Dataset/main/CITATION.cff",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/CITATION.cff?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/6c43864863411bcf1dde4795583f49ff2e9a875e",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/CITATION.cff"
+    }
+  },
+  {
+    "name": "LICENSE",
+    "path": "LICENSE",
+    "sha": "92afca83dcbdccd81d1d162bb535c29ff8b07c28",
+    "size": 171,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/LICENSE?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/LICENSE",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/92afca83dcbdccd81d1d162bb535c29ff8b07c28",
+    "download_url": "https://raw.githubusercontent.com/armandobecerril/MSL-150-Dataset/main/LICENSE",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/LICENSE?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/92afca83dcbdccd81d1d162bb535c29ff8b07c28",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/LICENSE"
+    }
+  },
+  {
+    "name": "README.md",
+    "path": "README.md",
+    "sha": "f12e8ea8a2f9af3c869385e78ee5862668b5a496",
+    "size": 9373,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/README.md?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/README.md",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/f12e8ea8a2f9af3c869385e78ee5862668b5a496",
+    "download_url": "https://raw.githubusercontent.com/armandobecerril/MSL-150-Dataset/main/README.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/README.md?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/f12e8ea8a2f9af3c869385e78ee5862668b5a496",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/README.md"
+    }
+  },
+  {
+    "name": "data",
+    "path": "data",
+    "sha": "f70e0cd5fb9823f5f6665e08dc1a48aee40e728c",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/f70e0cd5fb9823f5f6665e08dc1a48aee40e728c",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/f70e0cd5fb9823f5f6665e08dc1a48aee40e728c",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data"
+    }
+  },
+  {
+    "name": "docs",
+    "path": "docs",
+    "sha": "402bdfa4fd9a6630cb9f29ee6b92741993635794",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/docs?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/docs",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/402bdfa4fd9a6630cb9f29ee6b92741993635794",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/docs?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/402bdfa4fd9a6630cb9f29ee6b92741993635794",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/docs"
+    }
+  },
+  {
+    "name": "models",
+    "path": "models",
+    "sha": "f920bc08a3b01c1fe0d371c0955839500067f38e",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/f920bc08a3b01c1fe0d371c0955839500067f38e",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/f920bc08a3b01c1fe0d371c0955839500067f38e",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models"
+    }
+  },
+  {
+    "name": "notebooks",
+    "path": "notebooks",
+    "sha": "4a455b2965111cb0c641dcb6a97f542e7ef0b605",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/notebooks?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/notebooks",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/4a455b2965111cb0c641dcb6a97f542e7ef0b605",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/notebooks?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/4a455b2965111cb0c641dcb6a97f542e7ef0b605",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/notebooks"
+    }
+  },
+  {
+    "name": "src",
+    "path": "src",
+    "sha": "d564d0bc3dd917926892c55e3706cc116d5b165e",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/src?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/src",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/d564d0bc3dd917926892c55e3706cc116d5b165e",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/src?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/d564d0bc3dd917926892c55e3706cc116d5b165e",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/src"
+    }
+  },
+  {
+    "name": "version.txt",
+    "path": "version.txt",
+    "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/version.txt?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/version.txt",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "download_url": "https://raw.githubusercontent.com/armandobecerril/MSL-150-Dataset/main/version.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/version.txt?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/version.txt"
+    }
+  }
+]

@@ -7,6 +7,8 @@ class AppwriteConfig {
   static const String usersCollectionId = 'users';
   static const String chatsCollectionId = 'chats';
   static const String messagesCollectionId = 'messages';
+  /// Crea este bucket en Appwrite (público lectura) para avatares.
+  static const String avatarsBucketId = 'avatars';
 }
 
 final Client appwriteClient = Client()
@@ -17,3 +19,4 @@ final Client appwriteClient = Client()
 final Account account = Account(appwriteClient);
 final Databases databases = Databases(appwriteClient);
 final Realtime realtime = Realtime(appwriteClient);
+final Storage storage = Storage(appwriteClient);

@@ -45,16 +45,56 @@ app.get('/', (_req, res) => {
   });
 });
 
+const LSB_VOCAB = [
+  'Hola', 'Sí', 'No', 'Bien', 'Mal', 'Yo', 'Gracias', 'Por favor',
+  'Dolor', 'Ayuda', 'Doctor', 'Hoy', 'Mamá', 'Papá', 'Comer', 'Beber',
+  'Dormir', 'Adiós',
+];
+
+/** Fallback local si Gemini no está o falla. */
+function composeLocal(signs) {
+  if (!signs.length) return '';
+  if (signs.length === 1) return signs[0];
+  const set = new Set(signs);
+  if (set.has('Yo') && set.has('Bien')) return 'Yo estoy bien';
+  if (set.has('Yo') && set.has('Mal')) return 'Yo estoy mal';
+  if (set.has('Yo') && set.has('Dolor')) return 'Yo tengo dolor';
+  if (set.has('Yo') && set.has('Ayuda')) return 'Yo necesito ayuda';
+  if (set.has('Dolor') && set.has('Doctor')) return 'Tengo dolor, necesito un doctor';
+  if (set.has('Ayuda') && set.has('Doctor')) return 'Necesito ayuda del doctor';
+  if (signs[0] === 'Hola') {
+    const rest = signs.slice(1);
+    if (rest.length === 1 && rest[0] === 'Bien') return 'Hola, estoy bien';
+    return rest.length ? `Hola, ${rest.join(' ').toLowerCase()}` : 'Hola';
+  }
+  if (set.has('Comer') || set.has('Beber') || set.has('Dormir')) {
+    const action = signs.find((e) => e === 'Comer' || e === 'Beber' || e === 'Dormir');
+    const verb = String(action).toLowerCase();
+    if (set.has('Yo')) return `Yo quiero ${verb}`;
+    if (set.has('Hoy')) return `Hoy quiero ${verb}`;
+    return `Quiero ${verb}`;
+  }
+  if (set.has('Hoy') && signs.length >= 2) {
+    return `Hoy ${signs.filter((e) => e !== 'Hoy').join(' ').toLowerCase()}`;
+  }
+  return `${signs.join(', ')}.`;
+}
+
+function cleanSentence(text) {
+  return String(text || '')
+    .trim()
+    .replace(/^["'«»]+|["'«»]+$/g, '')
+    .replace(/^frase\s*:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
- * Agente Gemini: señas → frase en español
- * POST /ai/compose { "signs": ["Hola","Bien"] }
+ * Agente Gemini: señas → frase en español (Bolivia)
+ * POST /ai/compose
+ * { "signs": ["Hola","Bien"], "previous"?: "...", "locale"?: "es-BO" }
  */
 app.post('/ai/compose', async (req, res) => {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) {
-    return res.status(503).json({ error: 'GEMINI_API_KEY no configurada' });
-  }
-
   const signs = Array.isArray(req.body?.signs)
     ? req.body.signs.map((s) => String(s).trim()).filter(Boolean)
     : [];
@@ -62,14 +102,36 @@ app.post('/ai/compose', async (req, res) => {
     return res.status(400).json({ error: 'signs requerido' });
   }
 
-  const prompt =
-    'Eres intérprete de lengua de señas hacia español latinoamericano (Bolivia). ' +
-    'Recibes tokens de señas y debes devolver SOLO una frase natural en español, ' +
-    'corta, sin comillas ni explicación.\nSeñas: ' +
-    signs.join(' → ');
+  const previous = String(req.body?.previous || '').trim();
+  const locale = String(req.body?.locale || 'es-BO').trim();
+  const localSentence = composeLocal(signs);
+
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    return res.json({
+      signs,
+      sentence: localSentence,
+      source: 'local',
+      confidence: 0.55,
+      note: 'GEMINI_API_KEY no configurada',
+    });
+  }
+
+  const prompt = [
+    'Eres intérprete de Lengua de Señas hacia español latinoamericano (Bolivia).',
+    'Convierte tokens de señas en UNA frase natural, corta y hablable.',
+    'Reglas: solo la frase; sin comillas, sin markdown, sin explicación.',
+    'No inventes señas que no estén en la secuencia.',
+    `Vocabulario frecuente: ${LSB_VOCAB.join(', ')}.`,
+    `Locale: ${locale}.`,
+    previous ? `Frase anterior (refina si encaja): ${previous}` : '',
+    `Señas en orden: ${signs.join(' → ')}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   try {
-    const model = 'gemini-flash-latest';
+    const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
     const url =
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
     const r = await fetch(url, {
@@ -77,25 +139,38 @@ app.post('/ai/compose', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 120 },
+        generationConfig: { temperature: 0.15, maxOutputTokens: 80 },
       }),
     });
     const data = await r.json();
     if (!r.ok) {
       console.error('Gemini error', r.status, data);
-      return res.status(502).json({ error: 'Gemini falló', detail: data });
+      return res.json({
+        signs,
+        sentence: localSentence,
+        source: 'local',
+        confidence: 0.5,
+        note: 'gemini_fallback',
+      });
     }
     const text =
       data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
-    const sentence = String(text).trim().replace(/^["']|["']$/g, '');
+    const sentence = cleanSentence(text) || localSentence;
     return res.json({
       signs,
-      sentence: sentence || signs.join(', ') + '.',
+      sentence,
       source: 'gemini',
+      confidence: 0.9,
     });
   } catch (e) {
     console.error('Gemini', e);
-    return res.status(500).json({ error: String(e.message || e) });
+    return res.json({
+      signs,
+      sentence: localSentence,
+      source: 'local',
+      confidence: 0.45,
+      note: String(e.message || e),
+    });
   }
 });
 

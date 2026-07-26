@@ -8,8 +8,6 @@ import 'chat_service.dart';
 
 /// Servidor realtime en Render (WebSocket).
 class RealtimeConfig {
-  /// URL pública del servicio en Render (sin /ws).
-  /// Se actualiza al desplegar; también se puede pasar con --dart-define.
   static const String httpBase = String.fromEnvironment(
     'CONECTA_REALTIME_URL',
     defaultValue: 'https://conecta-realtime.onrender.com',
@@ -24,7 +22,7 @@ class RealtimeConfig {
   }
 }
 
-/// Sala de videollamada accesible vía Render WebSocket (tiempo real).
+/// Sala de videollamada + lobby personal para recibir llamadas.
 class CallService {
   final _chatService = ChatService();
 
@@ -37,15 +35,26 @@ class CallService {
   String? _userId;
   String? _role;
 
+  // Lobby (recibir llamadas)
+  WebSocketChannel? _lobbyChannel;
+  StreamSubscription? _lobbySub;
+  Timer? _lobbyPing;
+  Timer? _lobbyReconnect;
+  String? _lobbyUserId;
+  void Function(Map<String, dynamic>)? _onInvite;
+
   final _captionController =
       StreamController<Map<String, dynamic>>.broadcast();
   final _peerController = StreamController<Map<String, dynamic>>.broadcast();
   final _signalController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _callEventController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Map<String, dynamic>> get captions => _captionController.stream;
   Stream<Map<String, dynamic>> get peers => _peerController.stream;
   Stream<Map<String, dynamic>> get signals => _signalController.stream;
+  Stream<Map<String, dynamic>> get callEvents => _callEventController.stream;
 
   bool get isConnected => _channel != null;
 
@@ -57,6 +66,143 @@ class CallService {
       userId: currentUserId,
       otherUserId: otherUserId,
     );
+  }
+
+  /// Conecta al lobby personal `lobby:<userId>` para recibir invitaciones.
+  Future<void> connectLobby({
+    required String userId,
+    required void Function(Map<String, dynamic>) onInvite,
+  }) async {
+    _lobbyUserId = userId;
+    _onInvite = onInvite;
+    await disconnectLobby(reconnect: false);
+
+    try {
+      debugPrint('Lobby connect ${RealtimeConfig.wsUri}');
+      _lobbyChannel = WebSocketChannel.connect(RealtimeConfig.wsUri);
+      await _lobbyChannel!.ready.timeout(const Duration(seconds: 12));
+
+      _lobbySub = _lobbyChannel!.stream.listen(
+        (raw) {
+          try {
+            final msg = jsonDecode(raw as String) as Map<String, dynamic>;
+            final type = msg['type']?.toString();
+            if (type == 'invite') {
+              _onInvite?.call(msg);
+              _callEventController.add(msg);
+            } else if (type == 'call_response') {
+              _callEventController.add(msg);
+            }
+          } catch (e) {
+            debugPrint('Lobby parse: $e');
+          }
+        },
+        onError: (_) => _scheduleLobbyReconnect(),
+        onDone: _scheduleLobbyReconnect,
+        cancelOnError: false,
+      );
+
+      _lobbySend({
+        'type': 'join',
+        'roomId': 'lobby:$userId',
+        'userId': userId,
+        'role': 'lobby',
+      });
+
+      _lobbyPing?.cancel();
+      _lobbyPing = Timer.periodic(const Duration(seconds: 25), (_) {
+        _lobbySend({'type': 'ping'});
+      });
+    } catch (e) {
+      debugPrint('Lobby connect failed: $e');
+      _scheduleLobbyReconnect();
+    }
+  }
+
+  void _scheduleLobbyReconnect() {
+    if (_lobbyUserId == null) return;
+    _lobbyReconnect?.cancel();
+    _lobbyReconnect = Timer(const Duration(seconds: 3), () {
+      final uid = _lobbyUserId;
+      final cb = _onInvite;
+      if (uid != null && cb != null) {
+        connectLobby(userId: uid, onInvite: cb);
+      }
+    });
+  }
+
+  void _lobbySend(Map<String, dynamic> data) {
+    final ch = _lobbyChannel;
+    if (ch == null) return;
+    try {
+      ch.sink.add(jsonEncode(data));
+    } catch (_) {}
+  }
+
+  void sendInvite({
+    required String toUserId,
+    required String fromUserId,
+    required String fromName,
+    required String roomId,
+  }) {
+    final payload = {
+      'type': 'invite',
+      'roomId': 'lobby:$toUserId',
+      'userId': fromUserId,
+      'toUserId': toUserId,
+      'fromUserId': fromUserId,
+      'fromName': fromName,
+      'callRoomId': roomId,
+    };
+    // Intentar por lobby propio; el servidor reenvía a lobby del destinatario
+    if (_lobbyChannel != null) {
+      _lobbySend({
+        ...payload,
+        'type': 'invite',
+        'roomId': roomId,
+        'targetLobby': 'lobby:$toUserId',
+      });
+    }
+    // También por canal de sala si está activo
+    _send({
+      ...payload,
+      'type': 'invite',
+      'targetLobby': 'lobby:$toUserId',
+      'roomId': roomId,
+    });
+  }
+
+  void sendCallResponse({
+    required String toUserId,
+    required String fromUserId,
+    required String roomId,
+    required bool accepted,
+  }) {
+    final msg = {
+      'type': 'call_response',
+      'targetLobby': 'lobby:$toUserId',
+      'fromUserId': fromUserId,
+      'toUserId': toUserId,
+      'roomId': roomId,
+      'accepted': accepted,
+    };
+    _lobbySend(msg);
+    _send(msg);
+  }
+
+  Future<void> disconnectLobby({bool reconnect = true}) async {
+    if (!reconnect) {
+      _lobbyReconnect?.cancel();
+      _lobbyUserId = null;
+      _onInvite = null;
+    }
+    _lobbyPing?.cancel();
+    await _lobbySub?.cancel();
+    _lobbySub = null;
+    try {
+      await _lobbyChannel?.sink.close();
+    } catch (_) {}
+    _lobbyChannel = null;
   }
 
   Future<void> connect({
@@ -135,6 +281,10 @@ class CallService {
         case 'signal':
           _signalController.add(msg);
           break;
+        case 'invite':
+        case 'call_response':
+          _callEventController.add(msg);
+          break;
         case 'pong':
         case 'welcome':
           break;
@@ -208,13 +358,14 @@ class CallService {
   }
 
   Future<void> dispose() async {
+    await disconnectLobby(reconnect: false);
     await disconnect();
     await _captionController.close();
     await _peerController.close();
     await _signalController.close();
+    await _callEventController.close();
   }
 
-  // Compat API antigua (ya no usa Appwrite para captions)
   static String? parseCaption(String raw) => raw;
   static String? parseCaptionRole(String raw) => null;
 }

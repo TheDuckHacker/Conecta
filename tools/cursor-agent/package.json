@@ -1,0 +1,23 @@
+{
+  "name": "conecta-cursor-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Agente de desarrollo Conecta LSB con Cursor SDK",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "prompt": "tsx src/cli.ts prompt",
+    "review": "tsx src/cli.ts review",
+    "fix": "tsx src/cli.ts fix"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.23"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}

@@ -6,6 +6,7 @@ import 'package:appwrite/appwrite.dart' show RealtimeSubscription;
 import 'package:conecta_lsb/services/chat_service.dart';
 import 'package:conecta_lsb/services/contact_service.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
+import 'package:conecta_lsb/services/call_invite_service.dart';
 import 'package:conecta_lsb/screens/video_call_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
@@ -423,20 +424,57 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  void _openCall(CallUserRole role) {
-    Navigator.push(
+  void _openCall(CallUserRole role) async {
+    final me = widget.currentUserId;
+    final other = widget.otherUserId;
+    if (me.isEmpty || other == null || other.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se puede iniciar la llamada')),
+      );
+      return;
+    }
+
+    String callerName = 'Usuario';
+    try {
+      final user = await AuthService().getCurrentUser();
+      if (user != null && user.name.isNotEmpty) callerName = user.name;
+    } catch (_) {}
+
+    String? roomId;
+    try {
+      roomId = await CallInviteService.instance.startOutgoingCall(
+        callerId: me,
+        callerName: callerName,
+        calleeId: other,
+      );
+    } catch (e) {
+      debugPrint('startOutgoingCall: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al llamar: $e')),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => VideoCallScreen(
           userName: widget.name,
           userAvatar: widget.avatar,
           isVideoCall: true,
-          currentUserId: widget.currentUserId,
-          otherUserId: widget.otherUserId,
+          currentUserId: me,
+          otherUserId: other,
+          roomId: roomId,
+          isCaller: true,
           initialRole: role,
         ),
       ),
     );
+    await CallInviteService.instance.endCall(me);
+    await CallInviteService.instance.clearRingingOnCallee(other);
   }
 
   String get _statusLabel {

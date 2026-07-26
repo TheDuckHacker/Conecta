@@ -1,0 +1,162 @@
+[
+  {
+    "name": "GRU_128",
+    "path": "models/trained_models/GRU_128",
+    "sha": "a800fa5e22ca1bb07321f8b3149aeba700ae2737",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_128?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_128",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/a800fa5e22ca1bb07321f8b3149aeba700ae2737",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_128?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/a800fa5e22ca1bb07321f8b3149aeba700ae2737",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_128"
+    }
+  },
+  {
+    "name": "GRU_128_128",
+    "path": "models/trained_models/GRU_128_128",
+    "sha": "0bc9b1590979a74e66b9827ac8132f0aada0582a",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_128_128?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_128_128",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/0bc9b1590979a74e66b9827ac8132f0aada0582a",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_128_128?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/0bc9b1590979a74e66b9827ac8132f0aada0582a",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_128_128"
+    }
+  },
+  {
+    "name": "GRU_128_256_128",
+    "path": "models/trained_models/GRU_128_256_128",
+    "sha": "01ed60dfc2e47bf59af48405768ff26ec06c1477",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_128_256_128?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_128_256_128",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/01ed60dfc2e47bf59af48405768ff26ec06c1477",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_128_256_128?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/01ed60dfc2e47bf59af48405768ff26ec06c1477",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_128_256_128"
+    }
+  },
+  {
+    "name": "GRU_64",
+    "path": "models/trained_models/GRU_64",
+    "sha": "aa29731f2358382027b753e5f385d1622e50a9dc",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_64?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_64",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/aa29731f2358382027b753e5f385d1622e50a9dc",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_64?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/aa29731f2358382027b753e5f385d1622e50a9dc",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_64"
+    }
+  },
+  {
+    "name": "GRU_64_128",
+    "path": "models/trained_models/GRU_64_128",
+    "sha": "de4f3a41d06ec50f078e0b0e1a5e8ac111abb30f",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_64_128?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_64_128",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/de4f3a41d06ec50f078e0b0e1a5e8ac111abb30f",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/GRU_64_128?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/de4f3a41d06ec50f078e0b0e1a5e8ac111abb30f",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/GRU_64_128"
+    }
+  },
+  {
+    "name": "LSTM_128",
+    "path": "models/trained_models/LSTM_128",
+    "sha": "72c1e726d790afe64088f1112b3f81277a4554a3",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_128?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_128",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/72c1e726d790afe64088f1112b3f81277a4554a3",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_128?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/72c1e726d790afe64088f1112b3f81277a4554a3",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_128"
+    }
+  },
+  {
+    "name": "LSTM_128_128",
+    "path": "models/trained_models/LSTM_128_128",
+    "sha": "23357205c5347292380b3efc1153060e5429ecee",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_128_128?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_128_128",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/23357205c5347292380b3efc1153060e5429ecee",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_128_128?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/23357205c5347292380b3efc1153060e5429ecee",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_128_128"
+    }
+  },
+  {
+    "name": "LSTM_128_256_128",
+    "path": "models/trained_models/LSTM_128_256_128",
+    "sha": "28d1a49f51b7410e4bd03f29bf75b283ef4872cd",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_128_256_128?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_128_256_128",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/28d1a49f51b7410e4bd03f29bf75b283ef4872cd",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_128_256_128?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/28d1a49f51b7410e4bd03f29bf75b283ef4872cd",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_128_256_128"
+    }
+  },
+  {
+    "name": "LSTM_64",
+    "path": "models/trained_models/LSTM_64",
+    "sha": "8bf9979867bf225f0efcb30cc5b26009d07b5b64",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_64?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_64",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/8bf9979867bf225f0efcb30cc5b26009d07b5b64",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_64?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/8bf9979867bf225f0efcb30cc5b26009d07b5b64",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_64"
+    }
+  },
+  {
+    "name": "LSTM_64_128",
+    "path": "models/trained_models/LSTM_64_128",
+    "sha": "81c3dbaae33fdb43ea926102823e6d241f7b6bf4",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_64_128?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_64_128",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/81c3dbaae33fdb43ea926102823e6d241f7b6bf4",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/models/trained_models/LSTM_64_128?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/81c3dbaae33fdb43ea926102823e6d241f7b6bf4",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/models/trained_models/LSTM_64_128"
+    }
+  }
+]

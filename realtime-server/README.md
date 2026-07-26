@@ -5,7 +5,11 @@ Servidor WebSocket para subtítulos LSB y señalización de videollamada en tiem
 ## Endpoints
 
 - `GET /health` — estado
+- `POST /ai/compose` — señas → frase (`signs`, opcional `previous`, `locale`)
+- `POST /tts` — texto → audio MPEG (ElevenLabs)
 - `WS /ws` — salas (`join`, `caption`, `signal`, `leave`, `ping`)
+
+Env: `GEMINI_API_KEY`, `GEMINI_MODEL` (opcional), `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`.
 
 ## Local
 

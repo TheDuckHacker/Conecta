@@ -12,6 +12,12 @@
 .swiftpm/
 migrate_working_dir/
 
+# Secrets / agent
+.env
+tools/cursor-agent/.env
+tools/cursor-agent/node_modules/
+tools/cursor-agent/dist/
+
 # IntelliJ related
 *.iml
 *.ipr

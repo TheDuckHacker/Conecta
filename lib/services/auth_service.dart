@@ -276,12 +276,34 @@ class AuthService {
 
   /// Convención de `users.status`:
   /// - online / offline
-  /// - typing:<chatId>  → escribiendo en ese chat (sigue contando como en línea)
+  /// - typing:<chatId>
+  /// - ringing:<fromId>:<roomId>:<nombre>
+  /// - in_call:<roomId>
   static bool isOnlineStatus(String status) =>
-      status == 'online' || status.startsWith('typing:');
+      status == 'online' ||
+      status.startsWith('typing:') ||
+      status.startsWith('ringing:') ||
+      status.startsWith('in_call:');
 
   static bool isTypingInChat(String status, String chatId) =>
       chatId.isNotEmpty && status == 'typing:$chatId';
+
+  /// Parsea llamada entrante desde status del usuario.
+  static IncomingCallInfo? parseIncomingCall(String status) {
+    if (!status.startsWith('ringing:')) return null;
+    final parts = status.split(':');
+    if (parts.length < 4) return null;
+    final fromId = parts[1];
+    final roomId = parts[2];
+    final name = Uri.decodeComponent(parts.sublist(3).join(':'));
+    if (fromId.isEmpty || roomId.isEmpty) return null;
+    return IncomingCallInfo(
+      fromUserId: fromId,
+      fromName: name.isEmpty ? 'Contacto' : name,
+      roomId: roomId,
+      rawStatus: status,
+    );
+  }
 
   Future<void> setOnlineStatus(String userId, bool isOnline) async {
     try {
@@ -354,4 +376,19 @@ class AuthService {
       throw Exception('No se pudo cerrar sesión');
     }
   }
+}
+
+/// Info mínima de llamada entrante (evita ciclo con CallInviteService).
+class IncomingCallInfo {
+  final String fromUserId;
+  final String fromName;
+  final String roomId;
+  final String rawStatus;
+
+  const IncomingCallInfo({
+    required this.fromUserId,
+    required this.fromName,
+    required this.roomId,
+    required this.rawStatus,
+  });
 }

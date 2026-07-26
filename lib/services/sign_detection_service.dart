@@ -1,12 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:ui';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 
-/// Resultado de una detección LSB en tiempo real.
+/// Resultado de detección de señas en español (enfoque solo manos).
 class SignDetectionResult {
   final String phrase;
   final double confidence;
@@ -23,14 +24,51 @@ class SignDetectionResult {
   });
 }
 
-/// Detección LSB en tiempo real con ML Kit Pose (estilo MediaPipe).
+/// Detección estilo [GestureGuide](https://github.com/Innominados/LenguajeSenas_Web):
+/// 1. Mientras hay manos → acumular frames de la seña
+/// 2. Confirmar seña estable
+/// 3. Emitir UNA frase
+/// 4. Limpiar buffer → listo para la siguiente seña
 class SignDetectionService {
   PoseDetector? _detector;
   bool _busy = false;
-  DateTime _lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
-  String? _lastPhrase;
-  final List<_PoseSample> _history = [];
+  final List<_HandPose> _history = [];
   int _frameSkip = 0;
+
+  /// Votos de la seña actual.
+  final Map<String, int> _votes = {};
+  int _gestureFrames = 0;
+  String? _lastEmitted;
+  DateTime _lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
+
+  static const int _minGestureFrames = 3;
+  static const int _votesToConfirm = 3;
+
+  List<String> _mslTerms = const [];
+  List<String> _quickPhrases = const [];
+  int deviceOrientationDegrees = 0;
+
+  List<String> get mslTerms => _mslTerms;
+  List<String> get quickPhrases =>
+      _quickPhrases.isNotEmpty ? _quickPhrases : _fallbackQuick;
+
+  static const _fallbackQuick = [
+    'Hola',
+    'Sí',
+    'No',
+    'Bien',
+    'Mal',
+    'Yo',
+    'Gracias',
+    'Por favor',
+    'Dolor',
+    'Doctor',
+    'Hoy',
+    'Comer',
+    'Beber',
+    'Dormir',
+    'Adiós',
+  ];
 
   Future<void> start() async {
     _detector ??= PoseDetector(
@@ -39,22 +77,64 @@ class SignDetectionService {
         model: PoseDetectionModel.base,
       ),
     );
+    await _loadVocabulary();
+  }
+
+  Future<void> _loadVocabulary() async {
+    try {
+      final termsRaw = await rootBundle.loadString('assets/msl/terms.txt');
+      _mslTerms = termsRaw
+          .split(RegExp(r'\r?\n'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+
+      final vocabRaw =
+          await rootBundle.loadString('assets/msl/vocabulary.json');
+      final map = jsonDecode(vocabRaw) as Map<String, dynamic>;
+      final qp = map['quickPhrases'];
+      if (qp is List) {
+        _quickPhrases = qp.map((e) => e.toString()).toList();
+      }
+    } catch (e) {
+      debugPrint('MSL vocab: $e');
+      _quickPhrases = _fallbackQuick;
+    }
   }
 
   Future<void> stop() async {
     await _detector?.close();
     _detector = null;
+    _resetGesture();
     _history.clear();
   }
 
-  /// Procesa un frame de cámara. [camera] ayuda a calcular la rotación correcta.
+  void _resetGesture() {
+    _votes.clear();
+    _gestureFrames = 0;
+    _history.clear();
+  }
+
+  void syncOrientation(CameraController? camera) {
+    if (camera == null || !camera.value.isInitialized) return;
+    switch (camera.value.deviceOrientation) {
+      case DeviceOrientation.portraitUp:
+        deviceOrientationDegrees = 0;
+      case DeviceOrientation.landscapeLeft:
+        deviceOrientationDegrees = 90;
+      case DeviceOrientation.portraitDown:
+        deviceOrientationDegrees = 180;
+      case DeviceOrientation.landscapeRight:
+        deviceOrientationDegrees = 270;
+    }
+  }
+
   Future<SignDetectionResult?> processCameraImage(
     CameraImage image, {
     required CameraDescription camera,
   }) async {
     if (_detector == null || _busy) return null;
 
-    // Saltar 1 de cada 2 frames para fluidez en tiempo real
     _frameSkip = (_frameSkip + 1) % 2;
     if (_frameSkip != 0) return null;
 
@@ -73,81 +153,54 @@ class SignDetectionService {
 
       final poses = await _detector!.processImage(input);
       if (poses.isEmpty) {
+        _resetGesture();
         return const SignDetectionResult(
           phrase: '',
           confidence: 0,
           handsVisible: false,
-          bodyVisible: false,
           status: 'buscando',
         );
       }
 
-      final sample = _PoseSample.fromPose(
+      final sample = _HandPose.fromPose(
         poses.first,
         imageWidth: image.width.toDouble(),
         imageHeight: image.height.toDouble(),
       );
-      if (sample == null) {
+
+      if (sample == null || !sample.anyHandVisible) {
+        _resetGesture();
         return const SignDetectionResult(
           phrase: '',
           confidence: 0,
           handsVisible: false,
           bodyVisible: true,
-          status: 'cuerpo',
+          status: 'buscando',
         );
       }
 
       _history.add(sample);
-      if (_history.length > 10) _history.removeAt(0);
-
-      final handsVisible = sample.leftHandUp ||
-          sample.rightHandUp ||
-          sample.wristsNearFace ||
-          sample.handsTogether ||
-          sample.rightHandMid ||
-          sample.leftHandMid;
+      if (_history.length > 12) _history.removeAt(0);
+      _gestureFrames++;
 
       final guess = _classify(sample);
-      if (guess == null) {
-        return SignDetectionResult(
-          phrase: '',
-          confidence: 0,
-          handsVisible: handsVisible,
-          bodyVisible: true,
-          status: handsVisible ? 'manos' : 'cuerpo',
-        );
+      if (guess != null) {
+        _votes[guess.phrase] = (_votes[guess.phrase] ?? 0) + 1;
       }
 
-      final now = DateTime.now();
-      // Cooldown corto para tiempo real
-      if (guess.phrase == _lastPhrase &&
-          now.difference(_lastEmit) < const Duration(milliseconds: 900)) {
-        return SignDetectionResult(
-          phrase: '',
-          confidence: guess.confidence,
-          handsVisible: true,
-          bodyVisible: true,
-          status: 'seña',
-        );
-      }
-      if (now.difference(_lastEmit) < const Duration(milliseconds: 450)) {
-        return SignDetectionResult(
-          phrase: '',
-          confidence: guess.confidence,
-          handsVisible: true,
-          bodyVisible: true,
-          status: 'seña',
-        );
+      final best = _bestVote();
+      if (best != null &&
+          (_votes[best]! >= _votesToConfirm) &&
+          _gestureFrames >= _minGestureFrames) {
+        return _commit(best);
       }
 
-      _lastPhrase = guess.phrase;
-      _lastEmit = now;
-      return SignDetectionResult(
-        phrase: guess.phrase,
-        confidence: guess.confidence,
+      return const SignDetectionResult(
+        phrase: '',
+        confidence: 0,
         handsVisible: true,
         bodyVisible: true,
-        status: 'seña',
+        status: 'manos',
       );
     } catch (e) {
       debugPrint('SignDetection: $e');
@@ -157,101 +210,178 @@ class SignDetectionService {
     }
   }
 
+  String? _bestVote() {
+    if (_votes.isEmpty) return null;
+    var best = _votes.entries.first;
+    for (final e in _votes.entries) {
+      if (e.value > best.value) best = e;
+    }
+    if (best.value < 1) return null;
+    return best.key;
+  }
+
+  SignDetectionResult _commit(String phrase) {
+    final now = DateTime.now();
+    // Misma seña: cooldown más largo para no repetir "Hola Hola Hola"
+    final same = phrase == _lastEmitted;
+    final wait = same
+        ? const Duration(milliseconds: 2200)
+        : const Duration(milliseconds: 500);
+    if (now.difference(_lastEmit) < wait) {
+      return const SignDetectionResult(
+        phrase: '',
+        confidence: 0.5,
+        handsVisible: true,
+        status: 'seña',
+      );
+    }
+
+    _lastEmitted = phrase;
+    _lastEmit = now;
+    final conf =
+        ((_votes[phrase] ?? 1) / max(1, _gestureFrames)).clamp(0.55, 0.95);
+
+    _resetGesture();
+
+    return SignDetectionResult(
+      phrase: phrase,
+      confidence: conf.toDouble(),
+      handsVisible: true,
+      bodyVisible: true,
+      status: 'seña',
+    );
+  }
+
   InputImageRotation _rotationForCamera(CameraDescription camera) {
-    // Orientación del sensor (90/270 típico en móviles)
     final sensor = camera.sensorOrientation;
     if (Platform.isIOS) {
       return InputImageRotationValue.fromRawValue(sensor) ??
           InputImageRotation.rotation0deg;
     }
-    // Android front camera often mirrored; use sensor orientation directly
-    return InputImageRotationValue.fromRawValue(sensor) ??
+    var rotationCompensation = deviceOrientationDegrees;
+    if (camera.lensDirection == CameraLensDirection.front) {
+      rotationCompensation = (sensor + rotationCompensation) % 360;
+    } else {
+      rotationCompensation = (sensor - rotationCompensation + 360) % 360;
+    }
+    return InputImageRotationValue.fromRawValue(rotationCompensation) ??
         InputImageRotation.rotation90deg;
   }
 
-  SignDetectionResult? _classify(_PoseSample s) {
-    // Gracias: mano cerca de la cara
-    if (s.wristsNearFace) {
-      return const SignDetectionResult(
-        phrase: 'Gracias',
-        confidence: 0.78,
-        handsVisible: true,
-        status: 'seña',
-      );
+  /// Clasifica por gesto específico. Orden: más específico → más genérico.
+  /// "Hola" SOLO con saludo claro (mano alta + vaivén horizontal fuerte).
+  SignDetectionResult? _classify(_HandPose s) {
+    if (_history.length < 3) return null;
+
+    final wave = _horizontalAmp();
+    final nod = _verticalAmp();
+    final peaks = _wavePeaks();
+    final handUp = s.rightHandUp || s.leftHandUp;
+    final handHigh = s.rightHandHigh || s.leftHandHigh;
+    final mid = s.rightHandMid || s.leftHandMid;
+
+    // --- Posturas estáticas / locales (antes que el saludo) ---
+
+    // Yo: mano en el pecho, poco movimiento
+    if (s.handOnChest && wave < 0.045 && nod < 0.045) {
+      return _hit('Yo', 0.86);
     }
 
-    // Sí: movimiento vertical de muñeca
-    if (_history.length >= 3) {
-      final ys = _history.map((e) => e.rightWristY).toList();
-      final amp = ys.reduce(max) - ys.reduce(min);
-      if (amp > 0.06 && s.rightHandMid && !s.leftHandUp) {
-        return const SignDetectionResult(
-          phrase: 'Sí',
-          confidence: 0.72,
-          handsVisible: true,
-          status: 'seña',
-        );
-      }
+    // Gracias: muñeca cerca de la cara/barbilla, sin vaivén fuerte
+    if (s.wristsNearFace && wave < 0.05 && !handHigh) {
+      return _hit('Gracias', 0.88);
     }
 
-    // No: movimiento horizontal
-    if (_history.length >= 4) {
-      final xs = _history.map((e) => e.rightWristX).toList();
-      final amp = xs.reduce(max) - xs.reduce(min);
-      if (amp > 0.1 && (s.rightHandMid || s.rightHandUp)) {
-        return const SignDetectionResult(
-          phrase: 'No',
-          confidence: 0.7,
-          handsVisible: true,
-          status: 'seña',
-        );
-      }
+    // Cómo: cerca de la cara + movimiento corto (pregunta)
+    if (s.wristsNearFace && wave >= 0.03 && wave < 0.11) {
+      return _hit('Cómo', 0.82);
     }
 
-    // Hola: mano arriba + oscilación
-    if (s.rightHandUp || s.leftHandUp) {
-      if (_history.length >= 4) {
-        final xs = _history
-            .map((e) => e.rightHandUp ? e.rightWristX : e.leftWristX)
-            .toList();
-        final amp = xs.reduce(max) - xs.reduce(min);
-        if (amp > 0.08) {
-          return const SignDetectionResult(
-            phrase: 'Hola',
-            confidence: 0.82,
-            handsVisible: true,
-            status: 'seña',
-          );
-        }
-      }
-      // Mano alzada estable
-      return const SignDetectionResult(
-        phrase: 'Hola',
-        confidence: 0.6,
-        handsVisible: true,
-        status: 'seña',
-      );
+    // Comer: cerca de la boca, estable
+    if (s.wristsNearMouth && wave < 0.04 && nod < 0.05) {
+      return _hit('Comer', 0.8);
     }
 
-    if (s.handsTogether) {
-      return const SignDetectionResult(
-        phrase: 'Por favor',
-        confidence: 0.75,
-        handsVisible: true,
-        status: 'seña',
-      );
+    // Por favor / Dolor: manos juntas
+    if (s.leftOk && s.rightOk && s.handsTogether) {
+      if (s.bothHandsMid) return _hit('Dolor', 0.8);
+      return _hit('Por favor', 0.8);
     }
 
-    if (s.bothHandsMid && s.handsApart) {
-      return const SignDetectionResult(
-        phrase: '¿Cómo estás?',
-        confidence: 0.65,
-        handsVisible: true,
-        status: 'seña',
-      );
+    // No: a la altura del pecho, vaivén lateral claro
+    if (mid && !handHigh && wave >= 0.085 && peaks >= 1) {
+      return _hit('No', 0.86);
     }
 
+    // Sí: pecho, movimiento vertical
+    if (mid && !handHigh && nod >= 0.05 && wave < 0.055) {
+      return _hit('Sí', 0.85);
+    }
+
+    // Bien: pecho, mano quieta
+    if (mid && !handHigh && wave < 0.035 && nod < 0.035 && !s.wristsNearFace) {
+      return _hit('Bien', 0.78);
+    }
+
+    // Mal: mano baja
+    if (s.handLowDominant && wave < 0.05 && nod < 0.05) {
+      return _hit('Mal', 0.8);
+    }
+
+    // Adiós: mano media-alta + vaivén moderado (no tan alto como saludo)
+    if (handUp && !handHigh && wave >= 0.06 && wave < 0.12 && peaks >= 1) {
+      return _hit('Adiós', 0.8);
+    }
+
+    // Hola: mano bien arriba + vaivén horizontal claro
+    if (handHigh && wave >= 0.055 && peaks >= 1) {
+      return _hit('Hola', 0.92);
+    }
+    // Hola (versión estática): mano bien arriba sostenida
+    if (handHigh && _history.length >= 6 && wave < 0.03 && nod < 0.03) {
+      return _hit('Hola', 0.72);
+    }
+
+    // Nada claro todavía (no forzar Hola)
     return null;
+  }
+
+  SignDetectionResult _hit(String phrase, double confidence) {
+    return SignDetectionResult(
+      phrase: phrase,
+      confidence: confidence,
+      handsVisible: true,
+      status: 'seña',
+    );
+  }
+
+  /// Cuenta cambios de dirección horizontales (vaivén real).
+  int _wavePeaks() {
+    if (_history.length < 4) return 0;
+    final start = max(0, _history.length - 10);
+    final xs = _history.sublist(start).map((e) => e.activeWristX).toList();
+    var peaks = 0;
+    for (var i = 2; i < xs.length; i++) {
+      final d1 = xs[i - 1] - xs[i - 2];
+      final d2 = xs[i] - xs[i - 1];
+      if (d1.abs() < 0.008 || d2.abs() < 0.008) continue;
+      if (d1.sign != d2.sign) peaks++;
+    }
+    return peaks;
+  }
+
+  double _horizontalAmp() {
+    if (_history.length < 3) return 0;
+    final start = max(0, _history.length - 8);
+    final xs = _history.sublist(start).map((e) => e.activeWristX).toList();
+    return xs.reduce(max) - xs.reduce(min);
+  }
+
+  double _verticalAmp() {
+    if (_history.length < 3) return 0;
+    final start = max(0, _history.length - 8);
+    final ys = _history.sublist(start).map((e) => e.activeWristY).toList();
+    return ys.reduce(max) - ys.reduce(min);
   }
 
   InputImage? _toInputImage(CameraImage image, InputImageRotation rotation) {
@@ -261,20 +391,17 @@ class SignDetectionService {
               ? InputImageFormat.nv21
               : InputImageFormat.bgra8888);
 
-      Uint8List bytes;
-      int bytesPerRow;
+      late Uint8List bytes;
+      late int bytesPerRow;
 
       if (Platform.isAndroid) {
-        // NV21: preferir plano Y+UV concatenado correctamente
         if (image.planes.length == 1) {
           bytes = image.planes.first.bytes;
           bytesPerRow = image.planes.first.bytesPerRow;
         } else {
-          // Concatenar planos (Y + VU)
           final y = image.planes[0].bytes;
-          final uv = image.planes.length > 1
-              ? image.planes[1].bytes
-              : Uint8List(0);
+          final uv =
+              image.planes.length > 1 ? image.planes[1].bytes : Uint8List(0);
           bytes = Uint8List(y.length + uv.length);
           bytes.setRange(0, y.length, y);
           if (uv.isNotEmpty) {
@@ -307,7 +434,7 @@ class SignDetectionService {
   }
 }
 
-class _PoseSample {
+class _HandPose {
   final double leftWristX;
   final double leftWristY;
   final double rightWristX;
@@ -315,8 +442,12 @@ class _PoseSample {
   final double noseY;
   final double leftShoulderY;
   final double rightShoulderY;
+  final double leftHipY;
+  final double rightHipY;
+  final bool leftOk;
+  final bool rightOk;
 
-  const _PoseSample({
+  const _HandPose({
     required this.leftWristX,
     required this.leftWristY,
     required this.rightWristX,
@@ -324,23 +455,67 @@ class _PoseSample {
     required this.noseY,
     required this.leftShoulderY,
     required this.rightShoulderY,
+    required this.leftHipY,
+    required this.rightHipY,
+    required this.leftOk,
+    required this.rightOk,
   });
 
-  bool get leftHandUp => leftWristY < leftShoulderY - 0.04;
-  bool get rightHandUp => rightWristY < rightShoulderY - 0.04;
+  bool get anyHandVisible => leftOk || rightOk;
+  /// Mano claramente por encima del hombro (saludo).
+  bool get leftHandHigh => leftOk && leftWristY < leftShoulderY - 0.10;
+  bool get rightHandHigh => rightOk && rightWristY < rightShoulderY - 0.10;
+  bool get leftHandUp => leftOk && leftWristY < leftShoulderY - 0.04;
+  bool get rightHandUp => rightOk && rightWristY < rightShoulderY - 0.04;
   bool get leftHandMid =>
-      leftWristY > leftShoulderY - 0.03 && leftWristY < leftShoulderY + 0.22;
+      leftOk &&
+      leftWristY > leftShoulderY - 0.02 &&
+      leftWristY < leftShoulderY + 0.22;
   bool get rightHandMid =>
-      rightWristY > rightShoulderY - 0.03 && rightWristY < rightShoulderY + 0.22;
+      rightOk &&
+      rightWristY > rightShoulderY - 0.02 &&
+      rightWristY < rightShoulderY + 0.22;
   bool get bothHandsMid => leftHandMid && rightHandMid;
   bool get wristsNearFace =>
-      (leftWristY - noseY).abs() < 0.1 || (rightWristY - noseY).abs() < 0.1;
+      (leftOk &&
+          (leftWristY - noseY).abs() < 0.12 &&
+          leftWristY < leftShoulderY + 0.02) ||
+      (rightOk &&
+          (rightWristY - noseY).abs() < 0.12 &&
+          rightWristY < rightShoulderY + 0.02);
+  bool get wristsNearMouth =>
+      (leftOk &&
+          leftWristY > noseY - 0.02 &&
+          leftWristY < leftShoulderY + 0.05 &&
+          (leftWristY - noseY).abs() < 0.14) ||
+      (rightOk &&
+          rightWristY > noseY - 0.02 &&
+          rightWristY < rightShoulderY + 0.05 &&
+          (rightWristY - noseY).abs() < 0.14);
   bool get handsTogether =>
-      (leftWristX - rightWristX).abs() < 0.12 &&
-      (leftWristY - rightWristY).abs() < 0.12;
-  bool get handsApart => (leftWristX - rightWristX).abs() > 0.22;
+      leftOk &&
+      rightOk &&
+      (leftWristX - rightWristX).abs() < 0.14 &&
+      (leftWristY - rightWristY).abs() < 0.14;
+  bool get handOnChest =>
+      (rightOk &&
+          rightWristY > rightShoulderY + 0.02 &&
+          rightWristY < rightHipY - 0.08 &&
+          rightWristX > 0.32 &&
+          rightWristX < 0.68) ||
+      (leftOk &&
+          leftWristY > leftShoulderY + 0.02 &&
+          leftWristY < leftHipY - 0.08 &&
+          leftWristX > 0.32 &&
+          leftWristX < 0.68);
+  bool get handLowDominant =>
+      (rightOk && rightWristY > rightHipY - 0.01) ||
+      (leftOk && leftWristY > leftHipY - 0.01);
 
-  static _PoseSample? fromPose(
+  double get activeWristX => rightOk ? rightWristX : leftWristX;
+  double get activeWristY => rightOk ? rightWristY : leftWristY;
+
+  static _HandPose? fromPose(
     Pose pose, {
     required double imageWidth,
     required double imageHeight,
@@ -350,27 +525,31 @@ class _PoseSample {
     final nose = pose.landmarks[PoseLandmarkType.nose];
     final ls = pose.landmarks[PoseLandmarkType.leftShoulder];
     final rs = pose.landmarks[PoseLandmarkType.rightShoulder];
-    if (lw == null || rw == null || nose == null || ls == null || rs == null) {
-      return null;
-    }
+    final lh = pose.landmarks[PoseLandmarkType.leftHip];
+    final rh = pose.landmarks[PoseLandmarkType.rightHip];
 
-    // ML Kit entrega píxeles: normalizar a 0–1
+    if (nose == null || ls == null || rs == null) return null;
+
     final w = imageWidth <= 0 ? 1.0 : imageWidth;
     final h = imageHeight <= 0 ? 1.0 : imageHeight;
+    bool ok(PoseLandmark? p) => p != null && p.likelihood > 0.15;
 
-    bool ok(PoseLandmark p) => p.likelihood > 0.3;
+    final leftOk = ok(lw);
+    final rightOk = ok(rw);
+    if (!leftOk && !rightOk) return null;
 
-    // Si las muñecas no son confiables, igual intentar con hombros
-    if (!ok(ls) || !ok(rs) || !ok(nose)) return null;
-
-    return _PoseSample(
-      leftWristX: lw.x / w,
-      leftWristY: lw.y / h,
-      rightWristX: rw.x / w,
-      rightWristY: rw.y / h,
+    return _HandPose(
+      leftWristX: (lw?.x ?? 0) / w,
+      leftWristY: (lw?.y ?? 0) / h,
+      rightWristX: (rw?.x ?? 0) / w,
+      rightWristY: (rw?.y ?? 0) / h,
       noseY: nose.y / h,
       leftShoulderY: ls.y / h,
       rightShoulderY: rs.y / h,
+      leftHipY: (lh?.y ?? ls.y + 0.35 * h) / h,
+      rightHipY: (rh?.y ?? rs.y + 0.35 * h) / h,
+      leftOk: leftOk,
+      rightOk: rightOk,
     );
   }
 }

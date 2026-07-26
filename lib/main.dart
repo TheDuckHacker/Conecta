@@ -2,13 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:conecta_lsb/screens/login.dart';
 import 'package:conecta_lsb/screens/chat.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
+import 'package:conecta_lsb/services/notification_service.dart';
+import 'package:conecta_lsb/services/settings_service.dart';
+import 'package:conecta_lsb/widgets/incoming_call_host.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('FlutterError: ${details.exceptionAsString()}');
   };
+
+  await SettingsService.instance.load();
+  await NotificationService.instance.init();
 
   runApp(const ConectaApp());
 }
@@ -126,7 +132,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     }
 
     if (_hasSession) {
-      return const ChatScreen();
+      return const IncomingCallHost(child: ChatScreen());
     }
 
     return const Login();

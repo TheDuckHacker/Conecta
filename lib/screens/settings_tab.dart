@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:conecta_lsb/screens/login.dart';
 import 'package:conecta_lsb/screens/profile.dart';
-import 'package:conecta_lsb/services/ai_config.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/avatar_service.dart';
 import 'package:conecta_lsb/services/call_invite_service.dart';
@@ -68,61 +67,6 @@ class _SettingsTabState extends State<SettingsTab> {
       return FileImage(File(_localAvatar));
     }
     return null;
-  }
-
-  Future<void> _openApiKeys() async {
-    final eleven = TextEditingController(text: AiConfig.elevenLabsApiKey);
-    final openai = TextEditingController(text: AiConfig.openAiApiKey);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Claves IA / Voz'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: eleven,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'ElevenLabs API Key',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: openai,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Gemini API Key (opcional local)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Guardar')),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await _voice.saveApiKeys(
-        elevenLabs: eleven.text,
-        gemini: openai.text,
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Claves guardadas')),
-        );
-        setState(() {});
-      }
-    }
-    eleven.dispose();
-    openai.dispose();
   }
 
   Future<void> _pickVoiceRate() async {
@@ -256,12 +200,6 @@ class _SettingsTabState extends State<SettingsTab> {
               ).then((_) => _loadProfile());
             },
           ),
-          _item(
-            icon: Icons.key_rounded,
-            title: 'ElevenLabs y Gemini (Render)',
-            subtitle: 'Claves en servidor · voz + agente IA',
-            onTap: _openApiKeys,
-          ),
           const SizedBox(height: 16),
           _header('TRADUCCIÓN'),
           _item(
@@ -281,11 +219,7 @@ class _SettingsTabState extends State<SettingsTab> {
             title: 'Voz de lectura',
             subtitle: _settings.voiceLabel,
             onTap: () async {
-              await _settings.setVoiceLabel(
-                AiConfig.hasElevenLabs
-                    ? 'ElevenLabs (español)'
-                    : 'TTS del dispositivo',
-              );
+              await _settings.setVoiceLabel('TTS del dispositivo / servidor');
               setState(() {});
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(

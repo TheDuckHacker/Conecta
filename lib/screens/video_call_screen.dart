@@ -5,8 +5,11 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/call_service.dart';
+import 'package:conecta_lsb/services/call_invite_service.dart';
+import 'package:conecta_lsb/services/sign_ai_agent.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
+import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
 
 enum CallUserRole { deaf, hearing }
 
@@ -21,6 +24,8 @@ class VideoCallScreen extends StatefulWidget {
   final bool isVideoCall;
   final String? currentUserId;
   final String? otherUserId;
+  final String? roomId;
+  final bool isCaller;
   final CallUserRole initialRole;
 
   const VideoCallScreen({
@@ -30,6 +35,8 @@ class VideoCallScreen extends StatefulWidget {
     this.isVideoCall = true,
     this.currentUserId,
     this.otherUserId,
+    this.roomId,
+    this.isCaller = true,
     this.initialRole = CallUserRole.deaf,
   });
 
@@ -62,22 +69,13 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   String _roomId = '';
   StreamSubscription? _captionListen;
   StreamSubscription? _peerListen;
+  StreamSubscription? _callEventListen;
   bool _wsConnected = false;
+  bool _peerConnected = false;
+  bool _callRejected = false;
   Timer? _timer;
+  Timer? _ringTimeout;
   int _seconds = 0;
-
-  static const _quickPhrases = [
-    'Hola',
-    '¿Cómo estás?',
-    'Bien',
-    'Gracias',
-    'Por favor',
-    'Sí',
-    'No',
-    'No entiendo',
-    'Repite por favor',
-    'Adiós',
-  ];
 
   @override
   void initState() {
@@ -137,7 +135,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     final previous = _camera;
     _camera = CameraController(
       desc,
-      ResolutionPreset.low, // más FPS = detección en tiempo real
+      ResolutionPreset.medium, // buena calidad sin aplastar + detección OK
       enableAudio: false,
       imageFormatGroup:
           Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
@@ -146,6 +144,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     await _camera!.initialize();
     if (!mounted) return;
 
+    _sign.syncOrientation(_camera);
     await _camera!.startImageStream(_onFrame);
     setState(() {
       _ready = true;
@@ -173,6 +172,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     if (_camera == null) return;
     _processing = true;
     try {
+      _sign.syncOrientation(_camera);
       final result = await _sign.processCameraImage(
         image,
         camera: _camera!.description,
@@ -195,8 +195,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         return;
       }
 
-      // No await speak: no congelar frames
-      unawaited(_emitLocalCaption(result.phrase, role: 'sign', speak: true));
+      // No await speak: no congelar frames — agente arma frase
+      if (result.phrase.isNotEmpty) {
+        final agent =
+            await SignLanguageAiAgent.instance.ingestSign(result.phrase);
+        if (!mounted) return;
+        unawaited(
+          _emitLocalCaption(agent.sentence, role: 'sign', speak: true),
+        );
+      }
     } finally {
       _processing = false;
     }
@@ -219,34 +226,46 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   Future<void> _initRoom() async {
     final me = widget.currentUserId;
     final other = widget.otherUserId;
-    if (me == null || other == null || me.isEmpty || other.isEmpty) {
-      _roomId = 'solo-${me ?? 'local'}';
-      try {
-        await _calls.connect(
-          roomId: _roomId,
-          userId: me ?? 'local',
-          role: _role == CallUserRole.deaf ? 'deaf' : 'hearing',
-        );
-        if (mounted) setState(() => _wsConnected = true);
-      } catch (e) {
-        debugPrint('solo room: $e');
-      }
+    if (me == null || me.isEmpty) {
+      _roomId = 'solo-local';
       return;
     }
 
     try {
-      final room = await _calls.createOrJoinRoom(
-        currentUserId: me,
-        otherUserId: other,
-      );
-      _roomId = room.$id;
+      if (widget.roomId != null && widget.roomId!.isNotEmpty) {
+        _roomId = widget.roomId!;
+      } else if (other != null && other.isNotEmpty) {
+        final room = await _calls.createOrJoinRoom(
+          currentUserId: me,
+          otherUserId: other,
+        );
+        _roomId = room.$id;
+      } else {
+        _roomId = 'solo-$me';
+      }
+
+      await CallInviteService.instance.markInCall(me, _roomId);
 
       await _calls.connect(
         roomId: _roomId,
         userId: me,
         role: _role == CallUserRole.deaf ? 'deaf' : 'hearing',
       );
-      if (mounted) setState(() => _wsConnected = true);
+      if (mounted) {
+        setState(() {
+          _wsConnected = true;
+          _statusHint = widget.isCaller
+              ? 'Llamando a ${widget.userName}...'
+              : 'Conectando subtítulos...';
+        });
+      }
+
+      if (widget.isCaller) {
+        _ringTimeout = Timer(const Duration(seconds: 45), () {
+          if (!mounted || _peerConnected) return;
+          setState(() => _statusHint = 'Sin respuesta — sigue en sala');
+        });
+      }
 
       _captionListen = _calls.captions.listen((msg) {
         final sender = msg['userId']?.toString() ?? '';
@@ -256,7 +275,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         _showOnScreenCaption(caption, fromRemote: true);
         setState(() => _statusHint = 'Subtítulo en vivo');
         if (_role == CallUserRole.hearing) {
-          _voice.speak(caption);
+          unawaited(_voice.speak(caption));
         }
       });
 
@@ -264,23 +283,44 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         if (!mounted) return;
         final type = msg['type']?.toString();
         if (type == 'peer_joined') {
-          setState(() => _statusHint = 'Conectado · subtítulos activos');
+          _ringTimeout?.cancel();
+          setState(() {
+            _peerConnected = true;
+            _statusHint = 'Conectado · subtítulos activos';
+          });
         } else if (type == 'peer_left') {
-          setState(() => _statusHint = 'El otro usuario salió');
+          setState(() {
+            _peerConnected = false;
+            _statusHint = 'El otro usuario salió';
+          });
         } else if (type == 'joined') {
           final peers = msg['peers'];
           final n = peers is List ? peers.length : 0;
           setState(() {
+            _peerConnected = n > 0;
             _statusHint = n > 0
                 ? 'Sala lista · subtítulos en pantalla'
-                : 'Esperando al otro · subtítulos listos';
+                : (widget.isCaller
+                    ? 'Llamando... esperando que conteste'
+                    : 'En llamada · subtítulos listos');
+          });
+        }
+      });
+
+      _callEventListen = CallInviteService.instance.callEvents.listen((msg) {
+        if (!mounted) return;
+        if (msg['type']?.toString() == 'call_response' &&
+            msg['accepted'] == false) {
+          setState(() {
+            _callRejected = true;
+            _statusHint = 'Llamada rechazada';
           });
         }
       });
     } catch (e) {
       debugPrint('initRoom: $e');
       if (mounted) {
-        setState(() => _statusHint = 'Sin Render aún — reintentando...');
+        setState(() => _statusHint = 'Reconectando servidor...');
       }
     }
   }
@@ -347,9 +387,20 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _ringTimeout?.cancel();
     _captionHoldTimer?.cancel();
     _captionListen?.cancel();
     _peerListen?.cancel();
+    _callEventListen?.cancel();
+    final me = widget.currentUserId;
+    if (me != null) {
+      unawaited(CallInviteService.instance.endCall(me));
+      if (widget.isCaller && widget.otherUserId != null) {
+        unawaited(
+          CallInviteService.instance.clearRingingOnCallee(widget.otherUserId!),
+        );
+      }
+    }
     _calls.dispose();
     _camera?.dispose();
     _sign.stop();
@@ -367,7 +418,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         fit: StackFit.expand,
         children: [
           if (_ready && !_isVideoOff && _camera != null)
-            CameraPreview(_camera!)
+            CameraCoverPreview(controller: _camera!)
           else
             Container(
               color: const Color(0xff0F172A),
@@ -422,9 +473,13 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                         ),
                       ),
                       Text(
-                        '${_fmt(_seconds)}${_wsConnected ? ' · En vivo' : ''}',
-                        style: const TextStyle(
-                          color: Color(0xff37C8F2),
+                        _callRejected
+                            ? 'Rechazada'
+                            : '${_fmt(_seconds)}${_wsConnected ? (_peerConnected ? ' · En llamada' : ' · Llamando...') : ''}',
+                        style: TextStyle(
+                          color: _callRejected
+                              ? Colors.redAccent
+                              : const Color(0xff37C8F2),
                           fontSize: 14,
                         ),
                       ),
@@ -497,10 +552,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  itemCount: _quickPhrases.length,
+                  itemCount: _sign.quickPhrases.length,
                   separatorBuilder: (_, __) => const SizedBox(width: 8),
                   itemBuilder: (_, i) {
-                    final p = _quickPhrases[i];
+                    final p = _sign.quickPhrases[i];
                     return ActionChip(
                       label: Text(p),
                       backgroundColor: Colors.white.withValues(alpha: 0.15),

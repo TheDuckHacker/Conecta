@@ -1,0 +1,43 @@
+{
+  "source": "MSL-150 Mexican Sign Language Dataset (terms.txt)",
+  "doi": "10.5281/zenodo.17783312",
+  "language": "es",
+  "note": "Vocabulario en español. Detección en dispositivo con landmarks de manos (ML Kit Hands).",
+  "quickPhrases": [
+    "Hola",
+    "Cómo",
+    "Sí",
+    "No",
+    "Bien",
+    "Mal",
+    "Yo",
+    "Gracias",
+    "Por favor",
+    "Dolor",
+    "Ayuda",
+    "Doctor",
+    "Hoy",
+    "Mamá",
+    "Papá",
+    "Comer",
+    "Beber",
+    "Dormir",
+    "Adiós"
+  ],
+  "detectable": [
+    {"id": "hola", "phrase": "Hola", "gesture": "wave_high"},
+    {"id": "como", "phrase": "Cómo", "gesture": "near_face_small_wave"},
+    {"id": "si", "phrase": "Sí", "gesture": "nod_mid"},
+    {"id": "no", "phrase": "No", "gesture": "wave_side_mid"},
+    {"id": "bien", "phrase": "Bien", "gesture": "static_mid"},
+    {"id": "mal", "phrase": "Mal", "gesture": "hand_low"},
+    {"id": "yo", "phrase": "Yo", "gesture": "point_chest"},
+    {"id": "gracias", "phrase": "Gracias", "gesture": "hand_chin"},
+    {"id": "por_favor", "phrase": "Por favor", "gesture": "hands_together"},
+    {"id": "dolor", "phrase": "Dolor", "gesture": "hands_together_mid"},
+    {"id": "comer", "phrase": "Comer", "gesture": "hand_mouth"},
+    {"id": "beber", "phrase": "Beber", "gesture": "cup_mouth"},
+    {"id": "dormir", "phrase": "Dormir", "gesture": "hand_cheek"},
+    {"id": "adios", "phrase": "Adiós", "gesture": "wave_mid"}
+  ]
+}

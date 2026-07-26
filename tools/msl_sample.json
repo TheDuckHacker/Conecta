@@ -1,0 +1,82 @@
+[
+  {
+    "name": "ambulancia",
+    "path": "data/sample_npy/ambulancia",
+    "sha": "356610a05ce5964d79ba27301dd6d48c571a3368",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/ambulancia?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/ambulancia",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/356610a05ce5964d79ba27301dd6d48c571a3368",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/ambulancia?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/356610a05ce5964d79ba27301dd6d48c571a3368",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/ambulancia"
+    }
+  },
+  {
+    "name": "doctor",
+    "path": "data/sample_npy/doctor",
+    "sha": "40a871cabc7c338c6a648dd9e57177064118933a",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/doctor?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/doctor",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/40a871cabc7c338c6a648dd9e57177064118933a",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/doctor?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/40a871cabc7c338c6a648dd9e57177064118933a",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/doctor"
+    }
+  },
+  {
+    "name": "dolor",
+    "path": "data/sample_npy/dolor",
+    "sha": "46c3c61f52091d7a7ea77fd0e85d79c62ebbf0d3",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/dolor?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/dolor",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/46c3c61f52091d7a7ea77fd0e85d79c62ebbf0d3",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/dolor?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/46c3c61f52091d7a7ea77fd0e85d79c62ebbf0d3",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/dolor"
+    }
+  },
+  {
+    "name": "hoy",
+    "path": "data/sample_npy/hoy",
+    "sha": "7d1b2d9c40205f5196ae1ce093e84193caac48f7",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/hoy?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/hoy",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/7d1b2d9c40205f5196ae1ce093e84193caac48f7",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/hoy?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/7d1b2d9c40205f5196ae1ce093e84193caac48f7",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/hoy"
+    }
+  },
+  {
+    "name": "yo",
+    "path": "data/sample_npy/yo",
+    "sha": "1be32de0dafc5f154d8e5f3e14069a4439d5f664",
+    "size": 0,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/yo?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/yo",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/1be32de0dafc5f154d8e5f3e14069a4439d5f664",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/sample_npy/yo?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/trees/1be32de0dafc5f154d8e5f3e14069a4439d5f664",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/tree/main/data/sample_npy/yo"
+    }
+  }
+]

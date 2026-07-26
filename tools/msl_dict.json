@@ -1,0 +1,34 @@
+[
+  {
+    "name": "terms.txt",
+    "path": "data/dictionary/terms.txt",
+    "sha": "3932923300058ddef9717e93977b68764a3ca862",
+    "size": 1029,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/dictionary/terms.txt?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/data/dictionary/terms.txt",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/3932923300058ddef9717e93977b68764a3ca862",
+    "download_url": "https://raw.githubusercontent.com/armandobecerril/MSL-150-Dataset/main/data/dictionary/terms.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/dictionary/terms.txt?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/3932923300058ddef9717e93977b68764a3ca862",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/data/dictionary/terms.txt"
+    }
+  },
+  {
+    "name": "terms_sample.txt",
+    "path": "data/dictionary/terms_sample.txt",
+    "sha": "603c013a33c560b8195ec9e9f572afbf8809fc5a",
+    "size": 30,
+    "url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/dictionary/terms_sample.txt?ref=main",
+    "html_url": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/data/dictionary/terms_sample.txt",
+    "git_url": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/603c013a33c560b8195ec9e9f572afbf8809fc5a",
+    "download_url": "https://raw.githubusercontent.com/armandobecerril/MSL-150-Dataset/main/data/dictionary/terms_sample.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/contents/data/dictionary/terms_sample.txt?ref=main",
+      "git": "https://api.github.com/repos/armandobecerril/MSL-150-Dataset/git/blobs/603c013a33c560b8195ec9e9f572afbf8809fc5a",
+      "html": "https://github.com/armandobecerril/MSL-150-Dataset/blob/main/data/dictionary/terms_sample.txt"
+    }
+  }
+]
