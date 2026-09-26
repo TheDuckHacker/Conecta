@@ -406,6 +406,7 @@ class CallService {
     required String senderId,
     required String text,
     required String role,
+    List<String>? signs,
   }) async {
     final clean = text.trim();
     if (clean.isEmpty) return;
@@ -415,6 +416,7 @@ class CallService {
       'userId': senderId,
       'text': clean,
       'role': role,
+      if (signs != null && signs.isNotEmpty) 'signs': signs,
     });
   }
 

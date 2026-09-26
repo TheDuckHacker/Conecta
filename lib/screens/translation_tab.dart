@@ -174,7 +174,9 @@ class _TranslationTabState extends State<TranslationTab> {
         if (_sentence.isEmpty) {
           final h = !_handsVisible
               ? 'Buscando manos… cuerpo visible, luz buena'
-              : SignGuide.liveHint;
+              : result.candidate.isNotEmpty
+                  ? 'Detectando: ${SignGuide.labelFor(result.candidate)}…'
+                  : SignGuide.liveHint;
           if (_hint != h) {
             _hint = h;
             changed = true;

@@ -15,12 +15,16 @@ class SignDetectionResult {
   final bool bodyVisible;
   final String status; // buscando | manos | seña
 
+  /// Seña que va ganando la votación (aún sin confirmar). Vacío si ninguna.
+  final String candidate;
+
   const SignDetectionResult({
     required this.phrase,
     required this.confidence,
     required this.handsVisible,
     this.bodyVisible = false,
     this.status = 'buscando',
+    this.candidate = '',
   });
 }
 
@@ -65,6 +69,17 @@ class SignDetectionService {
   PoseDetector? _detector;
   bool _busy = false;
   final List<_HandPose> _history = [];
+
+  /// Posición suavizada (EMA) de la mano activa, paralela a [_history].
+  /// Filtra el temblor de ML Kit para que no cuente como vaivén.
+  final List<double> _smoothX = [];
+  final List<double> _smoothY = [];
+  static const double _emaAlpha = 0.7;
+
+  /// Frames seguidos sin manos. Se tolera una pérdida breve antes de
+  /// descartar la seña en curso.
+  int _missFrames = 0;
+  static const int _maxMissFrames = 3;
 
   /// Puntos del último frame para dibujar el esqueleto de las manos.
   final ValueNotifier<HandPointsFrame?> points =
@@ -150,6 +165,32 @@ class SignDetectionService {
     _votes.clear();
     _gestureFrames = 0;
     _history.clear();
+    _smoothX.clear();
+    _smoothY.clear();
+  }
+
+  /// Pérdida de manos: solo reinicia si dura más de [_maxMissFrames].
+  void _onHandsMissing() {
+    _missFrames++;
+    if (_missFrames >= _maxMissFrames) _resetGesture();
+  }
+
+  void _pushSample(_HandPose sample) {
+    _history.add(sample);
+    final x = sample.activeHandX;
+    final y = sample.activeHandY;
+    if (_smoothX.isEmpty) {
+      _smoothX.add(x);
+      _smoothY.add(y);
+    } else {
+      _smoothX.add(_emaAlpha * x + (1 - _emaAlpha) * _smoothX.last);
+      _smoothY.add(_emaAlpha * y + (1 - _emaAlpha) * _smoothY.last);
+    }
+    if (_history.length > 14) {
+      _history.removeAt(0);
+      _smoothX.removeAt(0);
+      _smoothY.removeAt(0);
+    }
   }
 
   void syncOrientation(CameraController? camera) {
@@ -187,7 +228,7 @@ class SignDetectionService {
 
       final poses = await _detector!.processImage(input);
       if (poses.isEmpty) {
-        _resetGesture();
+        _onHandsMissing();
         points.value = null;
         return const SignDetectionResult(
           phrase: '',
@@ -210,7 +251,7 @@ class SignDetectionService {
       points.value = sample?.frame;
 
       if (sample == null || !sample.anyHandVisible) {
-        _resetGesture();
+        _onHandsMissing();
         return const SignDetectionResult(
           phrase: '',
           confidence: 0,
@@ -220,8 +261,8 @@ class SignDetectionService {
         );
       }
 
-      _history.add(sample);
-      if (_history.length > 14) _history.removeAt(0);
+      _missFrames = 0;
+      _pushSample(sample);
       _gestureFrames++;
 
       final guess = _classify(sample);
@@ -236,12 +277,13 @@ class SignDetectionService {
         return _commit(best);
       }
 
-      return const SignDetectionResult(
+      return SignDetectionResult(
         phrase: '',
         confidence: 0,
         handsVisible: true,
         bodyVisible: true,
         status: 'manos',
+        candidate: best ?? '',
       );
     } catch (e) {
       debugPrint('SignDetection: $e');
@@ -381,7 +423,7 @@ class SignDetectionService {
   /// Cuenta cambios de dirección horizontales (vaivén real).
   int _wavePeaks() {
     if (_history.length < 4) return 0;
-    final xs = _window().map((e) => e.activeHandX).toList();
+    final xs = _windowOf(_smoothX);
     var peaks = 0;
     for (var i = 2; i < xs.length; i++) {
       final d1 = xs[i - 1] - xs[i - 2];
@@ -392,20 +434,21 @@ class SignDetectionService {
     return peaks;
   }
 
-  List<_HandPose> _window() {
-    final start = max(0, _history.length - 8);
-    return _history.sublist(start);
+  /// Últimos 8 valores suavizados.
+  List<double> _windowOf(List<double> values) {
+    final start = max(0, values.length - 8);
+    return values.sublist(start);
   }
 
   double _horizontalAmp() {
-    if (_history.length < 2) return 0;
-    final xs = _window().map((e) => e.activeHandX).toList();
+    if (_smoothX.length < 2) return 0;
+    final xs = _windowOf(_smoothX);
     return xs.reduce(max) - xs.reduce(min);
   }
 
   double _verticalAmp() {
-    if (_history.length < 2) return 0;
-    final ys = _window().map((e) => e.activeHandY).toList();
+    if (_smoothY.length < 2) return 0;
+    final ys = _windowOf(_smoothY);
     return ys.reduce(max) - ys.reduce(min);
   }
 

@@ -81,6 +81,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   String _displaySource = '';
   /// Señas detectadas por el tracker que forman la frase ("Hola → ¿Cómo estás?").
   String _displaySigns = '';
+  /// Seña que el tracker está leyendo (aún sin confirmar).
+  String _candidate = '';
   String _statusHint = 'Iniciando cámara...';
   Timer? _captionHoldTimer;
 
@@ -232,15 +234,27 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       }
 
       if (result.phrase.isEmpty) {
+        final candidate = result.handsVisible && result.candidate.isNotEmpty
+            ? SignGuide.labelFor(result.candidate)
+            : '';
         // El detector nunca devuelve status 'cuerpo': se usa bodyVisible.
-        final hint = result.handsVisible
-            ? 'Manos OK — haz la seña'
-            : result.bodyVisible
-                ? 'Cuerpo OK — sube las manos'
-                : SignGuide.liveHint;
-        if (hint != _statusHint) setState(() => _statusHint = hint);
+        final hint = candidate.isNotEmpty
+            ? 'Detectando: $candidate…'
+            : result.handsVisible
+                ? 'Manos OK — haz la seña'
+                : result.bodyVisible
+                    ? 'Cuerpo OK — sube las manos'
+                    : SignGuide.liveHint;
+        if (hint != _statusHint || candidate != _candidate) {
+          setState(() {
+            _statusHint = hint;
+            _candidate = candidate;
+          });
+        }
         return;
       }
+
+      _candidate = '';
 
       // El banner se actualiza en _onAgentUpdate (frase local y luego IA).
       await SignLanguageAiAgent.instance.ingestSign(result.phrase);
@@ -295,7 +309,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       final sentence = agent.sentence.trim();
       if (sentence.isEmpty || sentence == _lastSpokenSign) return;
       _lastSpokenSign = sentence;
-      unawaited(_emitLocalCaption(sentence, role: 'sign', speak: true));
+      unawaited(_emitLocalCaption(
+        sentence,
+        role: 'sign',
+        speak: true,
+        signs: agent.signs.map(SignGuide.labelFor).toList(),
+      ));
     });
   }
 
@@ -404,6 +423,16 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       // Siempre pintar en el banner grande
       _displayCaption = clean;
     });
+    // Sin actividad nueva, el subtítulo se limpia para no confundir.
+    _captionHoldTimer?.cancel();
+    _captionHoldTimer = Timer(const Duration(seconds: 10), () {
+      if (!mounted) return;
+      setState(() {
+        _displayCaption = '';
+        _displaySigns = '';
+        _displaySource = '';
+      });
+    });
   }
 
   Future<void> _initRoom() async {
@@ -463,6 +492,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           fromRemote: true,
           source: msg['role']?.toString() ?? 'speech',
         );
+        final signs = msg['signs'];
+        if (signs is List && signs.isNotEmpty) {
+          setState(() => _displaySigns = signs.join(' → '));
+        }
         setState(() => _statusHint = 'Subtítulo en vivo');
         if (_role == CallUserRole.hearing) {
           unawaited(_voice.speak(caption));
@@ -567,6 +600,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     String text, {
     required String role,
     bool speak = false,
+    List<String>? signs,
   }) async {
     if (!mounted) return;
     _showOnScreenCaption(text, fromRemote: false, source: role);
@@ -578,6 +612,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         senderId: me,
         text: text,
         role: role,
+        signs: signs,
       );
     }
     if (speak && _role == CallUserRole.deaf) {
@@ -607,6 +642,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     SignLanguageAiAgent.instance.clear();
     _lastSpokenSign = '';
     _displaySigns = '';
+    _candidate = '';
 
     setState(() {
       _role = role;
@@ -1385,7 +1421,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     final readingSigns = _role == CallUserRole.deaf && _handsVisible;
     final placeholder = _role == CallUserRole.deaf
         ? (readingSigns
-            ? 'Manos detectadas… mantén la seña 1 segundo'
+            ? (_candidate.isNotEmpty
+                ? 'Detectando «$_candidate»… mantén la seña'
+                : 'Manos detectadas… mantén la seña 1 segundo')
             : 'Los subtítulos aparecerán aquí al hacer señas…')
         : 'Los subtítulos aparecerán aquí al hablar…';
     final sourceLabel = switch (_displaySource) {

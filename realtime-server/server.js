@@ -7,7 +7,7 @@
  *
  * Mensajes JSON:
  * { "type": "join", "roomId": "...", "userId": "...", "role": "deaf|hearing" }
- * { "type": "caption", "roomId": "...", "userId": "...", "text": "...", "role": "sign|speech|typed" }
+ * { "type": "caption", "roomId": "...", "userId": "...", "text": "...", "role": "sign|speech|typed", "signs": ["Hola", "..."] }
  * { "type": "signal", "roomId": "...", "userId": "...", "to": "...", "payload": { ... } }
  * { "type": "leave", "roomId": "...", "userId": "..." }
  */
@@ -692,6 +692,10 @@ wss.on('connection', (ws) => {
           userId,
           text,
           role: msg.role || 'typed',
+          // Señas detectadas que forman la frase (solo role=sign)
+          signs: Array.isArray(msg.signs)
+            ? msg.signs.slice(0, 10).map((s) => String(s).slice(0, 40))
+            : undefined,
           at: new Date().toISOString(),
         },
         userId,
