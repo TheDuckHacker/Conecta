@@ -163,7 +163,7 @@ class SignLanguageAiAgent {
     final res = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: AiConfig.headers,
           body: jsonEncode({
             'signs': signs,
             if (previous != null && previous.isNotEmpty) 'previous': previous,

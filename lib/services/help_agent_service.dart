@@ -45,7 +45,7 @@ class HelpAgentService {
     final res = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: AiConfig.headers,
           body: jsonEncode({
             'message': message.trim(),
             if (_sessionId != null) 'sessionId': _sessionId,
@@ -89,7 +89,7 @@ class HelpAgentService {
     final res = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: AiConfig.headers,
           body: jsonEncode({'to': to, 'text': text}),
         )
         .timeout(const Duration(seconds: 25));

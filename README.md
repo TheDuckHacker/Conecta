@@ -8,9 +8,23 @@ visual de señas.
 Proyecto para el **Cursor Buildathon Bolivia 2026** (25–26 de julio, Santa Cruz)
 — Track **Social Impact AI**.
 
-> ⚠️ Según las reglas del evento, el código se inicia durante la hackathon.
-> Este repositorio contiene por ahora la documentación y especificación
-> (preparación permitida).
+## Desarrollo y Construcción
+
+### Variables de Entorno
+
+La app se conecta a `https://conecta-realtime.onrender.com` por defecto. Para usar un servidor distinto o configurar autenticación:
+
+```bash
+# Servidor realtime personalizado (opcional)
+flutter build apk --dart-define=CONECTA_REALTIME_URL=https://tu-servidor.com
+
+# Clave API compartida (producción - debe coincidir con CONECTA_API_KEY del servidor)
+flutter build apk --dart-define=CONECTA_API_KEY=tu-clave-secreta
+```
+
+### Servidor Realtime
+
+Ver [`realtime-server/README.md`](./realtime-server/README.md) para configuración del servidor.
 
 ## Documentación (spec-kit)
 
