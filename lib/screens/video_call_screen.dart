@@ -77,6 +77,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   String _localCaption = '';
   String _remoteCaption = '';
   String _displayCaption = '';
+  /// Origen del subtítulo en pantalla: sign | speech | typed.
+  String _displaySource = '';
+  /// Señas detectadas por el tracker que forman la frase ("Hola → ¿Cómo estás?").
+  String _displaySigns = '';
   String _statusHint = 'Iniciando cámara...';
   Timer? _captionHoldTimer;
 
@@ -103,6 +107,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   void initState() {
     super.initState();
     _role = widget.initialRole;
+    SignLanguageAiAgent.instance.latest.addListener(_onAgentUpdate);
     _boot();
   }
 
@@ -227,24 +232,21 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       }
 
       if (result.phrase.isEmpty) {
-        if (result.status == 'manos' || result.status == 'cuerpo') {
-          setState(() {
-            _statusHint = result.status == 'manos'
-                ? 'Manos OK — haz la seña'
-                : 'Cuerpo OK — sube las manos';
-          });
-        } else if (!_handsVisible && _displayCaption.isEmpty) {
-          setState(() => _statusHint = SignGuide.liveHint);
-        }
+        // El detector nunca devuelve status 'cuerpo': se usa bodyVisible.
+        final hint = result.handsVisible
+            ? 'Manos OK — haz la seña'
+            : result.bodyVisible
+                ? 'Cuerpo OK — sube las manos'
+                : SignGuide.liveHint;
+        if (hint != _statusHint) setState(() => _statusHint = hint);
         return;
       }
 
-      final agent =
-          await SignLanguageAiAgent.instance.ingestSign(result.phrase);
+      // El banner se actualiza en _onAgentUpdate (frase local y luego IA).
+      await SignLanguageAiAgent.instance.ingestSign(result.phrase);
       if (!mounted) return;
-      _showOnScreenCaption(agent.sentence);
       setState(() {
-        _statusHint = SignGuide.labelFor(result.phrase);
+        _statusHint = 'Seña: ${SignGuide.labelFor(result.phrase)}';
       });
       _scheduleSignSpeak();
     } finally {
@@ -272,6 +274,17 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     }).catchError((_) {
       _encodingFrame = false;
     }));
+  }
+
+  /// Frase del agente (local al instante, refinada por IA después).
+  void _onAgentUpdate() {
+    final out = SignLanguageAiAgent.instance.latest.value;
+    if (out == null || !mounted || _role != CallUserRole.deaf) return;
+    if (out.sentence.trim().isEmpty) return;
+    _showOnScreenCaption(out.sentence, source: 'sign');
+    setState(() {
+      _displaySigns = out.signs.map(SignGuide.labelFor).join(' → ');
+    });
   }
 
   void _scheduleSignSpeak() {
@@ -373,10 +386,16 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     }
   }
 
-  void _showOnScreenCaption(String text, {bool fromRemote = false}) {
+  void _showOnScreenCaption(
+    String text, {
+    bool fromRemote = false,
+    String source = 'sign',
+  }) {
     final clean = text.trim();
     if (clean.isEmpty || !mounted) return;
     setState(() {
+      if (fromRemote || source != 'sign') _displaySigns = '';
+      _displaySource = source;
       if (fromRemote) {
         _remoteCaption = clean;
       } else {
@@ -439,7 +458,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         if (sender == me) return;
         final caption = (msg['text'] ?? '').toString().trim();
         if (caption.isEmpty || !mounted) return;
-        _showOnScreenCaption(caption, fromRemote: true);
+        _showOnScreenCaption(
+          caption,
+          fromRemote: true,
+          source: msg['role']?.toString() ?? 'speech',
+        );
         setState(() => _statusHint = 'Subtítulo en vivo');
         if (_role == CallUserRole.hearing) {
           unawaited(_voice.speak(caption));
@@ -546,7 +569,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     bool speak = false,
   }) async {
     if (!mounted) return;
-    _showOnScreenCaption(text, fromRemote: false);
+    _showOnScreenCaption(text, fromRemote: false, source: role);
 
     final me = widget.currentUserId ?? 'local';
     if (_roomId.isNotEmpty) {
@@ -567,7 +590,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       onResult: (text, isFinal) async {
         if (!mounted || text.trim().isEmpty) return;
         // Mostrar en pantalla en tiempo real (parciales también)
-        _showOnScreenCaption(text, fromRemote: false);
+        _showOnScreenCaption(text, fromRemote: false, source: 'speech');
         if (isFinal) {
           await _emitLocalCaption(text, role: 'speech', speak: false);
         }
@@ -583,6 +606,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     await _voice.stopListening();
     SignLanguageAiAgent.instance.clear();
     _lastSpokenSign = '';
+    _displaySigns = '';
 
     setState(() {
       _role = role;
@@ -650,6 +674,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     unawaited(_stopSignCamera());
     _calls.dispose();
     _sign.stop();
+    SignLanguageAiAgent.instance.latest.removeListener(_onAgentUpdate);
     SignLanguageAiAgent.instance.clear();
     unawaited(_voice.dispose());
     super.dispose();
@@ -1357,9 +1382,21 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   Widget _buildLiveSubtitles() {
     final hasText = _displayCaption.trim().isNotEmpty;
+    final readingSigns = _role == CallUserRole.deaf && _handsVisible;
     final placeholder = _role == CallUserRole.deaf
-        ? 'Los subtítulos aparecerán aquí al hacer señas…'
+        ? (readingSigns
+            ? 'Manos detectadas… mantén la seña 1 segundo'
+            : 'Los subtítulos aparecerán aquí al hacer señas…')
         : 'Los subtítulos aparecerán aquí al hablar…';
+    final sourceLabel = switch (_displaySource) {
+      'sign' => ' · SEÑAS LSB',
+      'speech' => ' · VOZ',
+      'typed' => ' · FRASE RÁPIDA',
+      _ => '',
+    };
+    final header = hasText
+        ? 'SUBTÍTULOS$sourceLabel'
+        : (readingSigns ? 'LEYENDO SEÑAS…' : 'ESPERANDO SUBTÍTULOS');
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1391,7 +1428,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    Icons.closed_caption_rounded,
+                    (hasText && _displaySource == 'sign') || readingSigns
+                        ? Icons.sign_language_rounded
+                        : Icons.closed_caption_rounded,
                     color: hasText
                         ? const Color(0xff37C8F2)
                         : Colors.white54,
@@ -1399,7 +1438,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    hasText ? 'SUBTÍTULOS' : 'ESPERANDO SUBTÍTULOS',
+                    header,
                     style: TextStyle(
                       color: hasText
                           ? const Color(0xff37C8F2)
@@ -1431,6 +1470,20 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                   ],
                 ),
               ),
+              if (hasText && _displaySigns.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Señas: $_displaySigns',
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
