@@ -99,7 +99,7 @@ class VoiceBridgeService {
           .post(
             uri,
             headers: {
-              'Content-Type': 'application/json',
+              ...AiConfig.headers,
               'Accept': 'audio/mpeg',
             },
             body: jsonEncode({'text': text}),

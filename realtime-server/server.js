@@ -23,15 +23,35 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
+const CONECTA_API_KEY = process.env.CONECTA_API_KEY;
+if (CONECTA_API_KEY) {
+  console.log('✓ CONECTA_API_KEY configurada → rutas protegidas con autenticación');
+} else {
+  console.warn('⚠ CONECTA_API_KEY no configurada → rutas HTTP abiertas (solo dev)');
+}
+
+function requireAuth(req, res, next) {
+  if (!CONECTA_API_KEY) return next();
+  const header = req.headers['x-conecta-key'] || req.headers.authorization?.replace(/^Bearer\s+/i, '');
+  if (!header || header !== CONECTA_API_KEY) {
+    return res.status(401).json({ error: 'No autorizado: X-Conecta-Key requerida' });
+  }
+  next();
+}
+
 app.get('/health', (_req, res) => {
+  const zavuKey = Boolean(process.env.ZAVU_API_KEY);
+  const zavuSender = Boolean(process.env.ZAVU_SENDER_ID);
+  const zavuReady = zavuKey && zavuSender;
   res.json({
     status: 'ok',
     rooms: rooms.size,
     clients: wss ? wss.clients.size : 0,
     uptime: process.uptime(),
-    ai: Boolean(process.env.GEMINI_API_KEY),
+    aiConfigured: Boolean(process.env.GEMINI_API_KEY),
     tts: Boolean(process.env.ELEVENLABS_API_KEY),
-    zavu: Boolean(process.env.ZAVU_API_KEY),
+    zavuKey,
+    zavuReady,
   });
 });
 
@@ -45,6 +65,7 @@ app.get('/', (_req, res) => {
     tts: '/tts',
     help: '/agent/help',
     zavu: '/agent/zavu/status',
+    invite: '/call/invite',
   });
 });
 
@@ -168,7 +189,7 @@ function cleanSentence(text) {
  * POST /ai/compose
  * { "signs": ["Hola","Bien"], "previous"?: "...", "locale"?: "es-BO" }
  */
-app.post('/ai/compose', async (req, res) => {
+app.post('/ai/compose', requireAuth, async (req, res) => {
   const signs = Array.isArray(req.body?.signs)
     ? req.body.signs.map((s) => String(s).trim()).filter(Boolean)
     : [];
@@ -208,47 +229,66 @@ app.post('/ai/compose', async (req, res) => {
     .filter(Boolean)
     .join('\n');
 
-  try {
-    const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
-    const url =
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.15, maxOutputTokens: 80 },
-      }),
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      console.error('Gemini error', r.status, data);
+  const models = [
+    process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp',
+    'gemini-1.5-flash',
+  ];
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    try {
+      const url =
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.15, maxOutputTokens: 80 },
+        }),
+      });
+      const data = await r.json();
+      
+      if (!r.ok) {
+        const errorDetail = data?.error?.message || JSON.stringify(data);
+        console.error(`Gemini ${model} error ${r.status}:`, errorDetail);
+        
+        if (i < models.length - 1 && (r.status === 404 || errorDetail.includes('model') || errorDetail.includes('not found'))) {
+          console.log(`Intentando modelo fallback: ${models[i + 1]}`);
+          continue;
+        }
+        
+        return res.json({
+          signs,
+          sentence: localSentence,
+          source: 'local',
+          confidence: 0.5,
+          note: 'gemini_fallback',
+        });
+      }
+      
+      const text =
+        data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+      const sentence = cleanSentence(text) || localSentence;
       return res.json({
         signs,
-        sentence: localSentence,
-        source: 'local',
-        confidence: 0.5,
-        note: 'gemini_fallback',
+        sentence,
+        source: 'gemini',
+        confidence: 0.9,
+        model,
       });
+    } catch (e) {
+      console.error(`Gemini ${model} excepción:`, e.message);
+      if (i === models.length - 1) {
+        return res.json({
+          signs,
+          sentence: localSentence,
+          source: 'local',
+          confidence: 0.45,
+          note: String(e.message || e),
+        });
+      }
     }
-    const text =
-      data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
-    const sentence = cleanSentence(text) || localSentence;
-    return res.json({
-      signs,
-      sentence,
-      source: 'gemini',
-      confidence: 0.9,
-    });
-  } catch (e) {
-    console.error('Gemini', e);
-    return res.json({
-      signs,
-      sentence: localSentence,
-      source: 'local',
-      confidence: 0.45,
-      note: String(e.message || e),
-    });
   }
 });
 
@@ -256,7 +296,7 @@ app.post('/ai/compose', async (req, res) => {
  * ElevenLabs TTS
  * POST /tts { "text": "Hola" } → audio/mpeg
  */
-app.post('/tts', async (req, res) => {
+app.post('/tts', requireAuth, async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) {
     return res.status(503).json({ error: 'ELEVENLABS_API_KEY no configurada' });
@@ -339,9 +379,12 @@ function helpLocalReply(message) {
 async function geminiHelp(history, userMessage) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-  const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
-  const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+  
+  const models = [
+    process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp',
+    'gemini-1.5-flash',
+  ];
+  
   const contents = [
     { role: 'user', parts: [{ text: HELP_SYSTEM }] },
     { role: 'model', parts: [{ text: 'Entendido. Ayudaré con Conecta LSB de forma clara y breve.' }] },
@@ -351,29 +394,46 @@ async function geminiHelp(history, userMessage) {
     })),
     { role: 'user', parts: [{ text: userMessage }] },
   ];
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents,
-      generationConfig: { temperature: 0.4, maxOutputTokens: 280 },
-    }),
-  });
-  const data = await r.json();
-  if (!r.ok) {
-    console.error('Gemini help', r.status, data);
-    return null;
+  
+  for (const model of models) {
+    try {
+      const url =
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          generationConfig: { temperature: 0.4, maxOutputTokens: 280 },
+        }),
+      });
+      const data = await r.json();
+      
+      if (!r.ok) {
+        const errorDetail = data?.error?.message || '';
+        console.error(`Gemini help ${model} error ${r.status}:`, errorDetail);
+        if (r.status === 404 || errorDetail.includes('model') || errorDetail.includes('not found')) {
+          continue;
+        }
+        return null;
+      }
+      
+      const text =
+        data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+      return String(text).trim() || null;
+    } catch (e) {
+      console.error(`Gemini help ${model} excepción:`, e.message);
+    }
   }
-  const text =
-    data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
-  return String(text).trim() || null;
+  
+  return null;
 }
 
 /**
  * Agente de ayuda in-app (Gemini + fallback local).
  * POST /agent/help { "message": "...", "sessionId"?: "..." }
  */
-app.post('/agent/help', async (req, res) => {
+app.post('/agent/help', requireAuth, async (req, res) => {
   const message = String(req.body?.message || '').trim();
   if (!message) return res.status(400).json({ error: 'message requerido' });
   const sessionId = String(req.body?.sessionId || randomUUID()).trim();
@@ -397,12 +457,16 @@ app.post('/agent/help', async (req, res) => {
   history.push({ role: 'assistant', text: reply });
   if (history.length > 24) history.splice(0, history.length - 24);
 
+  const zavuKey = Boolean(process.env.ZAVU_API_KEY);
+  const zavuSender = Boolean(process.env.ZAVU_SENDER_ID);
+  const zavuReady = zavuKey && zavuSender;
+
   return res.json({
     sessionId,
     reply,
     source,
     zavu: {
-      configured: Boolean(process.env.ZAVU_API_KEY),
+      configured: zavuReady,
       whatsappNumber: process.env.ZAVU_WHATSAPP_NUMBER || '',
     },
   });
@@ -414,12 +478,18 @@ app.post('/agent/help', async (req, res) => {
  */
 app.get('/agent/zavu/status', (_req, res) => {
   const number = String(process.env.ZAVU_WHATSAPP_NUMBER || '').replace(/\D/g, '');
+  const zavuKey = Boolean(process.env.ZAVU_API_KEY);
+  const zavuSender = Boolean(process.env.ZAVU_SENDER_ID);
+  const zavuReady = zavuKey && zavuSender;
+  
   res.json({
-    configured: Boolean(process.env.ZAVU_API_KEY),
-    senderId: Boolean(process.env.ZAVU_SENDER_ID),
+    key: zavuKey,
+    senderId: zavuSender,
+    ready: zavuReady,
     whatsappNumber: number,
     waMe: number ? `https://wa.me/${number}` : '',
     docs: 'https://www.zavu.dev/es',
+    configured: zavuReady,
   });
 });
 
@@ -428,7 +498,7 @@ app.get('/agent/zavu/status', (_req, res) => {
  * POST /agent/zavu/send { "to": "+591...", "text": "..." }
  * Docs: https://www.zavu.dev/es
  */
-app.post('/agent/zavu/send', async (req, res) => {
+app.post('/agent/zavu/send', requireAuth, async (req, res) => {
   const apiKey = process.env.ZAVU_API_KEY;
   if (!apiKey) {
     return res.status(503).json({
@@ -566,7 +636,7 @@ function leaveRoom(roomId, userId) {
 }
 
 /** HTTP: avisar llamada aunque el WS del llamante aún no esté listo */
-app.post('/call/invite', (req, res) => {
+app.post('/call/invite', requireAuth, (req, res) => {
   try {
     const toUserId = String(req.body?.toUserId || '').trim();
     const fromUserId = String(req.body?.fromUserId || '').trim();

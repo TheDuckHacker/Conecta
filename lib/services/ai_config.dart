@@ -13,8 +13,20 @@ class AiConfig {
     defaultValue: 'EXAVITQu4vr4xnSDxMaL',
   );
 
+  static const String _apiKey = String.fromEnvironment('CONECTA_API_KEY');
+
   static String get httpBase =>
       realtimeHttpBase.trim().replaceAll(RegExp(r'/$'), '');
+
+  /// Headers estándar para requests HTTP al servidor realtime.
+  /// Incluye X-Conecta-Key si está configurada (para producción).
+  static Map<String, String> get headers {
+    final map = <String, String>{'Content-Type': 'application/json'};
+    if (_apiKey.isNotEmpty) {
+      map['X-Conecta-Key'] = _apiKey;
+    }
+    return map;
+  }
 
   /// Siempre vía Render; no hay claves en el teléfono.
   static bool get useRenderAi => true;

@@ -5,6 +5,7 @@ import 'package:appwrite/models.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'ai_config.dart';
 import 'chat_service.dart';
 
 /// Servidor realtime en Render (WebSocket).
@@ -245,7 +246,7 @@ class CallService {
       final res = await http
           .post(
             RealtimeConfig.inviteUri,
-            headers: {'Content-Type': 'application/json'},
+            headers: AiConfig.headers,
             body: jsonEncode({
               'toUserId': toUserId,
               'fromUserId': fromUserId,
