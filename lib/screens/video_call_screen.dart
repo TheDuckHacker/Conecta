@@ -20,6 +20,8 @@ import 'package:conecta_lsb/services/voice_bridge_service.dart';
 import 'package:conecta_lsb/services/webrtc_call_session.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
 import 'package:conecta_lsb/widgets/hand_points_overlay.dart';
+import 'package:conecta_lsb/widgets/tracker_checklist.dart';
+import 'package:conecta_lsb/widgets/ui_kit.dart';
 
 enum CallUserRole { deaf, hearing }
 
@@ -87,6 +89,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   /// Seña que el tracker está leyendo (aún sin confirmar).
   String _candidate = '';
+
+  /// Sube con cada seña reconocida → destello verde + vibración.
+  int _signCount = 0;
   String _statusHint = 'Iniciando cámara...';
   Timer? _captionHoldTimer;
 
@@ -268,6 +273,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       if (!mounted) return;
       setState(() {
         _statusHint = 'Seña: ${SignGuide.labelFor(result.phrase)}';
+        _signCount++;
       });
       _scheduleSignSpeak();
     } finally {
@@ -855,30 +861,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             ),
           ),
 
-          // Guía corta de señas (modo sordo)
+          // Calibración en vivo (modo sordo): cuerpo · manos · luz.
           if (_role == CallUserRole.deaf)
             Positioned(
-              top: MediaQuery.paddingOf(context).top + 100,
+              top: MediaQuery.paddingOf(context).top + 104,
               left: 12,
               right: 130,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.brandBright, width: 1),
-                ),
-                child: const Text(
-                  SignGuide.liveHint,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    height: 1.25,
-                  ),
-                ),
+              child: TrackerChecklist(
+                sign: _sign,
+                handsVisible: _handsVisible,
               ),
             ),
 
@@ -1053,7 +1044,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         fit: StackFit.expand,
         children: [
           CameraCoverPreview(controller: _camera!),
-          if (full && _role == CallUserRole.deaf)
+          // También en la miniatura: la persona sorda ve que se leen sus
+          // manos sin tener que agrandar su propia cámara.
+          if (_role == CallUserRole.deaf)
             HandPointsOverlay(frames: _sign.points, mirror: _isFront),
         ],
       );
@@ -1455,112 +1448,116 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         ? 'SUBTÍTULOS$sourceLabel'
         : (readingSigns ? 'LEYENDO SEÑAS…' : 'ESPERANDO SUBTÍTULOS');
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Banda principal estilo TV / YouTube
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.82),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: hasText ? AppColors.brandBright : Colors.white24,
-              width: 1.5,
+    return SignFlash(
+      trigger: _signCount,
+      radius: 16,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Banda principal estilo TV / YouTube
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.82),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: hasText ? AppColors.brandBright : Colors.white24,
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.45),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    (hasText && _displaySource == 'sign') || readingSigns
-                        ? Icons.sign_language_rounded
-                        : Icons.closed_caption_rounded,
-                    color: hasText ? AppColors.brandBright : Colors.white54,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    header,
-                    style: TextStyle(
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      (hasText && _displaySource == 'sign') || readingSigns
+                          ? Icons.sign_language_rounded
+                          : Icons.closed_caption_rounded,
                       color: hasText ? AppColors.brandBright : Colors.white54,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.2,
+                      size: 18,
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                hasText ? _displayCaption : placeholder,
-                textAlign: TextAlign.center,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: hasText ? Colors.white : Colors.white60,
-                  fontSize: hasText ? 24 : 15,
-                  fontWeight: FontWeight.w800,
-                  height: 1.3,
-                  shadows: const [
-                    Shadow(
-                      color: Colors.black,
-                      blurRadius: 6,
-                      offset: Offset(0, 2),
+                    const SizedBox(width: 6),
+                    Text(
+                      header,
+                      style: TextStyle(
+                        color: hasText ? AppColors.brandBright : Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
+                      ),
                     ),
                   ],
                 ),
-              ),
-              if (hasText && _displaySigns.isNotEmpty) ...[
-                const SizedBox(height: 6),
+                const SizedBox(height: 10),
                 Text(
-                  'Señas: $_displaySigns',
+                  hasText ? _displayCaption : placeholder,
                   textAlign: TextAlign.center,
-                  maxLines: 1,
+                  maxLines: 4,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                  style: TextStyle(
+                    color: hasText ? Colors.white : Colors.white60,
+                    fontSize: hasText ? 24 : 15,
+                    fontWeight: FontWeight.w800,
+                    height: 1.3,
+                    shadows: const [
+                      Shadow(
+                        color: Colors.black,
+                        blurRadius: 6,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
                   ),
                 ),
+                if (hasText && _displaySigns.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Señas: $_displaySigns',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ],
-            ],
-          ),
-        ),
-        if (_remoteCaption.isNotEmpty &&
-            _localCaption.isNotEmpty &&
-            _remoteCaption != _localCaption) ...[
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(12),
             ),
-            child: Text(
-              'Tú: $_localCaption',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
+          ),
+          if (_remoteCaption.isNotEmpty &&
+              _localCaption.isNotEmpty &&
+              _remoteCaption != _localCaption) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'Tú: $_localCaption',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-          ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
