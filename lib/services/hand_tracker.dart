@@ -73,7 +73,7 @@ class HandShape {
   }
 }
 
-/// Envoltorio de MediaPipe Hand Landmarker (21 puntos por mano, GPU).
+/// Envoltorio de MediaPipe Hand Landmarker (21 puntos por mano, CPU).
 ///
 /// Solo Android. Si el plugin no carga, [available] queda en false y
 /// [SignDetectionService] sigue con los puntos de mano de ML Kit Pose.
@@ -94,25 +94,19 @@ class HandTracker {
 
   Future<void> start() async {
     if (_plugin != null || !Platform.isAndroid) return;
+    // CPU: el delegado GPU de TFLite falla en emuladores y en algunos GPU
+    // (GL_INVALID_ENUM en cada frame, error nativo que no llega a Dart).
+    // El modelo de manos es liviano: en CPU va a ~20 fps en un celular medio.
     try {
       _plugin = HandLandmarkerPlugin.create(
         numHands: 2,
         minHandDetectionConfidence: 0.5,
-        delegate: HandLandmarkerDelegate.gpu,
+        delegate: HandLandmarkerDelegate.cpu,
       );
     } catch (e) {
-      debugPrint('HandTracker GPU: $e — reintentando en CPU');
-      try {
-        _plugin = HandLandmarkerPlugin.create(
-          numHands: 2,
-          minHandDetectionConfidence: 0.5,
-          delegate: HandLandmarkerDelegate.cpu,
-        );
-      } catch (e) {
-        debugPrint('HandTracker no disponible: $e');
-        _plugin = null;
-        return;
-      }
+      debugPrint('HandTracker no disponible: $e');
+      _plugin = null;
+      return;
     }
     _sub = _plugin!.landmarkStream.listen(
       (hands) {
