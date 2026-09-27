@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:conecta_lsb/theme/app_theme.dart';
+import 'package:conecta_lsb/widgets/ui_kit.dart';
 import 'package:appwrite/models.dart';
 import 'package:appwrite/appwrite.dart' show RealtimeSubscription;
 import 'package:conecta_lsb/services/chat_service.dart';
@@ -199,7 +200,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   void _sortMessages() {
     _messages.sort(
-      (a, b) => ChatService.messageTime(a).compareTo(ChatService.messageTime(b)),
+      (a, b) =>
+          ChatService.messageTime(a).compareTo(ChatService.messageTime(b)),
     );
   }
 
@@ -354,7 +356,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al enviar: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error al enviar: $e'),
+              backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -447,7 +451,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     try {
       messenger.showSnackBar(
         const SnackBar(
-          content: Text('Llamando… asegúrate que el contacto tenga Conecta abierta'),
+          content:
+              Text('Llamando… asegúrate que el contacto tenga Conecta abierta'),
           duration: Duration(seconds: 3),
         ),
       );
@@ -522,17 +527,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           child: Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white, size: 20),
                 onPressed: () => Navigator.pop(context),
               ),
               CircleAvatar(
                 radius: 22,
                 backgroundColor: Colors.white,
-                backgroundImage: widget.avatar.isNotEmpty ? NetworkImage(widget.avatar) : null,
-                onBackgroundImageError: widget.avatar.isNotEmpty ? (_, __) {} : null,
+                backgroundImage: widget.avatar.isNotEmpty
+                    ? NetworkImage(widget.avatar)
+                    : null,
+                onBackgroundImageError:
+                    widget.avatar.isNotEmpty ? (_, __) {} : null,
                 child: widget.avatar.isEmpty
                     ? Text(
-                        widget.name.isNotEmpty ? widget.name[0].toUpperCase() : '?',
+                        widget.name.isNotEmpty
+                            ? widget.name[0].toUpperCase()
+                            : '?',
                         style: const TextStyle(
                           color: _headerBg,
                           fontWeight: FontWeight.bold,
@@ -564,7 +575,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             height: 8,
                             margin: const EdgeInsets.only(right: 6),
                             decoration: BoxDecoration(
-                              color: _isOnline ? AppColors.success : Colors.white70,
+                              color: _isOnline
+                                  ? AppColors.success
+                                  : Colors.white70,
                               shape: BoxShape.circle,
                               border: Border.all(color: Colors.white, width: 1),
                             ),
@@ -573,9 +586,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           child: Text(
                             _statusLabel,
                             style: TextStyle(
-                              color: _otherIsTyping
-                                  ? Colors.white
-                                  : Colors.white,
+                              color:
+                                  _otherIsTyping ? Colors.white : Colors.white,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               fontStyle: _otherIsTyping
@@ -601,7 +613,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       color: Colors.white.withValues(alpha: 0.25),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.videocam_rounded, color: Colors.white, size: 22),
+                    child: const Icon(Icons.videocam_rounded,
+                        color: Colors.white, size: 22),
                   ),
                 ),
               ),
@@ -620,39 +633,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
 
     if (_messages.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.chat_bubble_outline_rounded, color: _accent, size: 34),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Sin mensajes aún',
-                style: TextStyle(
-                  color: _textDark,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Escribe algo y empieza la conversación',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: _textMuted, fontSize: 14),
-              ),
-            ],
-          ),
-        ),
+      return EmptyState(
+        illustration: Illustrations.chatsEmpty,
+        title: 'Saluda a ${widget.name.split(' ').first}',
+        message: 'Escribe tu primer mensaje o inicia una videollamada '
+            'con subtítulos en vivo.',
       );
     }
 
@@ -660,8 +645,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       controller: _scrollController,
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-      itemCount: _messages.length,
+      // +1: burbuja "está escribiendo" al final, donde mira el usuario.
+      itemCount: _messages.length + (_otherIsTyping ? 1 : 0),
       itemBuilder: (context, index) {
+        if (index == _messages.length) {
+          return const Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: AppSpace.sm),
+              child: TypingBubble(label: 'Escribiendo'),
+            ),
+          );
+        }
         final msg = _messages[index];
         final isMe = msg.data['senderId']?.toString() == widget.currentUserId;
         final showTail = index == _messages.length - 1 ||
@@ -720,8 +715,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (_sameDay(date, now)) return 'Hoy';
     if (_sameDay(date, now.subtract(const Duration(days: 1)))) return 'Ayer';
     const months = [
-      'ene', 'feb', 'mar', 'abr', 'may', 'jun',
-      'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+      'ene',
+      'feb',
+      'mar',
+      'abr',
+      'may',
+      'jun',
+      'jul',
+      'ago',
+      'sep',
+      'oct',
+      'nov',
+      'dic',
     ];
     return '${date.day} ${months[date.month - 1]} ${date.year}';
   }
@@ -737,59 +742,68 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     required bool isMe,
     required bool showTail,
   }) {
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: EdgeInsets.only(bottom: showTail ? 10 : 4),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-        padding: const EdgeInsets.fromLTRB(14, 9, 12, 9),
-        decoration: BoxDecoration(
-          // Tú: azul sólido. Otro: blanco sólido (siempre legible)
-          color: isMe ? _accent : Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(isMe ? 18 : (showTail ? 4 : 18)),
-            bottomRight: Radius.circular(isMe ? (showTail ? 4 : 18) : 18),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
+    // Lector de pantalla: "Tú, 10:30: hola" en vez de leer las piezas.
+    return Semantics(
+      container: true,
+      label: '${isMe ? 'Tú' : widget.name}, $time: $text',
+      excludeSemantics: true,
+      child: Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: EdgeInsets.only(bottom: showTail ? 10 : 4),
+          constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.78),
+          padding: const EdgeInsets.fromLTRB(14, 9, 12, 9),
+          decoration: BoxDecoration(
+            // Tú: azul sólido. Otro: blanco sólido (siempre legible)
+            color: isMe ? _accent : Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(18),
+              topRight: const Radius.circular(18),
+              bottomLeft: Radius.circular(isMe ? 18 : (showTail ? 4 : 18)),
+              bottomRight: Radius.circular(isMe ? (showTail ? 4 : 18) : 18),
             ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Flexible(
-              child: Text(
-                text,
-                style: TextStyle(
-                  color: isMe ? Colors.white : _textDark,
-                  fontSize: 15.5,
-                  height: 1.3,
-                  fontWeight: FontWeight.w500,
-                ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
               ),
-            ),
-            if (time.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 1),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Flexible(
                 child: Text(
-                  time,
+                  text,
                   style: TextStyle(
-                    color: isMe ? Colors.white.withValues(alpha: 0.85) : _textMuted,
-                    fontSize: 11,
+                    color: isMe ? Colors.white : _textDark,
+                    fontSize: 16.5,
+                    height: 1.3,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
+              if (time.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 1),
+                  child: Text(
+                    time,
+                    style: TextStyle(
+                      color: isMe
+                          ? Colors.white.withValues(alpha: 0.85)
+                          : _textMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -821,30 +835,38 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ),
                     decoration: const InputDecoration(
                       border: InputBorder.none,
-                      hintText: 'Escribe un mensaje...',
+                      hintText: 'Escribe un mensaje',
                       hintStyle: TextStyle(color: _textMuted, fontSize: 15),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                     ),
                     onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
               ),
               const SizedBox(width: 10),
-              GestureDetector(
-                onTap: _isSending ? null : _sendMessage,
-                child: Container(
-                  width: 50,
-                  height: 50,
-                  decoration: const BoxDecoration(
-                    color: _accent,
-                    shape: BoxShape.circle,
+              // 56 dp, con etiqueta para lector de pantalla.
+              SizedBox(
+                width: kMainTouch,
+                height: kMainTouch,
+                child: IconButton.filled(
+                  tooltip: 'Enviar mensaje',
+                  onPressed: _isSending ? null : _sendMessage,
+                  style: IconButton.styleFrom(
+                    backgroundColor: _accent,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: _accent.withValues(alpha: 0.6),
                   ),
-                  child: _isSending
-                      ? const Padding(
-                          padding: EdgeInsets.all(14),
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  icon: _isSending
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
                         )
-                      : const Icon(Icons.send_rounded, color: Colors.white, size: 22),
+                      : const Icon(Icons.send_rounded, size: 24),
                 ),
               ),
             ],

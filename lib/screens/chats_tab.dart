@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:conecta_lsb/theme/app_theme.dart';
+import 'package:conecta_lsb/widgets/ui_kit.dart';
 import 'package:appwrite/models.dart';
 import 'package:conecta_lsb/screens/chat_detail.dart';
 import 'package:conecta_lsb/screens/user_profile.dart';
@@ -43,12 +44,12 @@ class _ChatsTabState extends State<ChatsTab> {
       if (_currentUser != null) {
         _contactService.clearCache();
         final results = await Future.wait([
-          _chatService
-              .getUserChats(_currentUser!.$id)
-              .timeout(const Duration(seconds: 10), onTimeout: () => <Document>[]),
-          _contactService
-              .getContacts(_currentUser!.$id)
-              .timeout(const Duration(seconds: 10), onTimeout: () => <Document>[]),
+          _chatService.getUserChats(_currentUser!.$id).timeout(
+              const Duration(seconds: 10),
+              onTimeout: () => <Document>[]),
+          _contactService.getContacts(_currentUser!.$id).timeout(
+              const Duration(seconds: 10),
+              onTimeout: () => <Document>[]),
         ]);
         _chats = results[0];
         _contactUsers = results[1];
@@ -92,7 +93,8 @@ class _ChatsTabState extends State<ChatsTab> {
               chatId: existingChat!.$id,
               name: user.data['name'] ?? 'Usuario',
               avatar: user.data['avatar'] ?? '',
-              isActive: AuthService.isOnlineStatus((user.data['status'] ?? '').toString()),
+              isActive: AuthService.isOnlineStatus(
+                  (user.data['status'] ?? '').toString()),
               currentUserId: _currentUser!.$id,
               otherUserId: user.$id,
             ),
@@ -117,8 +119,7 @@ class _ChatsTabState extends State<ChatsTab> {
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Eliminar contacto'),
-        content: Text(
-            '¿Quitar a $name de tus contactos? El chat se mantiene.'),
+        content: Text('¿Quitar a $name de tus contactos? El chat se mantiene.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -131,7 +132,8 @@ class _ChatsTabState extends State<ChatsTab> {
                   borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Eliminar', style: TextStyle(color: Colors.white)),
+            child:
+                const Text('Eliminar', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -328,10 +330,12 @@ class _ChatsTabState extends State<ChatsTab> {
       ),
       child: Row(
         children: [
-          Expanded(child: _buildTabChip('Chats', _isChatsTabSelected, () {
+          Expanded(
+              child: _buildTabChip('Chats', _isChatsTabSelected, () {
             setState(() => _isChatsTabSelected = true);
           })),
-          Expanded(child: _buildTabChip('Contactos', !_isChatsTabSelected, () {
+          Expanded(
+              child: _buildTabChip('Contactos', !_isChatsTabSelected, () {
             setState(() => _isChatsTabSelected = false);
           })),
         ],
@@ -371,77 +375,15 @@ class _ChatsTabState extends State<ChatsTab> {
     );
   }
 
-  Widget _buildEmptyState({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    Widget? actionWidget,
-  }) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.5),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Icon(icon, color: _accent, size: 36),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              title,
-              style: const TextStyle(
-                color: _textDark,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                  color: _textMuted, fontSize: 14, height: 1.4),
-            ),
-            if (actionWidget != null) ...[
-              const SizedBox(height: 20),
-              actionWidget,
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildChatList(List<Document> chats) {
     if (chats.isEmpty) {
-      return _buildEmptyState(
-        icon: Icons.chat_bubble_outline_rounded,
-        title: 'Sin chats recientes',
-        subtitle: 'Ve a Contactos y empieza una conversación nueva',
-        actionWidget: ElevatedButton.icon(
-          onPressed: () => setState(() => _isChatsTabSelected = false),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _accent,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          ),
-          icon: const Icon(Icons.people_outline_rounded, color: Colors.white),
-          label: const Text('Ver contactos',
-              style: TextStyle(color: Colors.white)),
-        ),
+      return EmptyState(
+        illustration: Illustrations.chatsEmpty,
+        title: 'Empieza tu primera conversación',
+        message: 'Elige un contacto para chatear por texto, señas o voz.',
+        actionLabel: 'Ver contactos',
+        actionIcon: Icons.people_outline_rounded,
+        onAction: () => setState(() => _isChatsTabSelected = false),
       );
     }
 
@@ -595,23 +537,13 @@ class _ChatsTabState extends State<ChatsTab> {
 
   Widget _buildContactList(List<Document> users) {
     if (users.isEmpty) {
-      return _buildEmptyState(
-        icon: Icons.person_add_alt_1_rounded,
-        title: 'Sin contactos guardados',
-        subtitle:
-            'Agrega contactos usando su número de teléfono para chatear fácilmente con ellos.',
-        actionWidget: ElevatedButton.icon(
-          onPressed: _openAddContactScreen,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _accent,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          ),
-          icon: const Icon(Icons.person_add_rounded, color: Colors.white),
-          label: const Text('Agregar contacto',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        ),
+      return EmptyState(
+        illustration: Illustrations.contactsEmpty,
+        title: 'Agrega a tu primer contacto',
+        message: 'Búscalo por su número de teléfono para chatear y llamar.',
+        actionLabel: 'Agregar contacto',
+        actionIcon: Icons.person_add_alt_1_rounded,
+        onAction: _openAddContactScreen,
       );
     }
 
@@ -678,9 +610,8 @@ class _ChatsTabState extends State<ChatsTab> {
                         width: 13,
                         height: 13,
                         decoration: BoxDecoration(
-                          color: isOnline
-                              ? AppColors.success
-                              : AppColors.border,
+                          color:
+                              isOnline ? AppColors.success : AppColors.border,
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
                         ),
