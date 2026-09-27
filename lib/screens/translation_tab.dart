@@ -13,6 +13,7 @@ import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
 import 'package:conecta_lsb/widgets/hand_points_overlay.dart';
 import 'package:conecta_lsb/widgets/tracker_checklist.dart';
 import 'package:conecta_lsb/widgets/ui_kit.dart';
+import 'package:conecta_lsb/widgets/understanding_panel.dart';
 
 /// Pestaña de traducción: cámara + señas → frase + voz.
 class TranslationTab extends StatefulWidget {
@@ -41,6 +42,9 @@ class _TranslationTabState extends State<TranslationTab> {
 
   /// Sube con cada seña reconocida: dispara el destello + vibración.
   int _signCount = 0;
+
+  /// Panel "Entendimiento" (cómo lee el motor la seña en vivo).
+  bool _showUnderstanding = false;
   String _sentence = '';
   String _agentSource = 'local';
   DateTime _lastSpeak = DateTime.fromMillisecondsSinceEpoch(0);
@@ -440,6 +444,18 @@ class _TranslationTabState extends State<TranslationTab> {
                   Flexible(child: _liveBadge()),
                   const Spacer(),
                   _cameraAction(
+                    icon: _showUnderstanding
+                        ? Icons.insights_rounded
+                        : Icons.insights_outlined,
+                    tooltip: _showUnderstanding
+                        ? 'Ocultar entendimiento'
+                        : 'Ver cómo entiende la seña',
+                    onPressed: () => setState(
+                      () => _showUnderstanding = !_showUnderstanding,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpace.sm),
+                  _cameraAction(
                     icon: Icons.menu_book_rounded,
                     tooltip: 'Guía de señas',
                     onPressed: _showSignGuide,
@@ -460,6 +476,12 @@ class _TranslationTabState extends State<TranslationTab> {
                 right: AppSpace.md,
                 child:
                     TrackerChecklist(sign: _sign, handsVisible: _handsVisible),
+              ),
+            if (ready && _showUnderstanding)
+              Positioned(
+                top: AppSpace.md + kMinTouch + AppSpace.sm + 36,
+                right: AppSpace.md,
+                child: UnderstandingPanel(sign: _sign),
               ),
             if (ready)
               Positioned(

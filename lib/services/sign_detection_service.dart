@@ -84,6 +84,51 @@ class HandPointsFrame {
   static const List<int> handIndexes = [2, 3, 4, 5, 8, 9, 10, 11];
 }
 
+/// Tipo de movimiento de la mano en la ventana reciente
+/// (modelo Hold–Movement–Hold de la fonología de lenguas de señas).
+enum MotionKind {
+  /// Sin manos o sin datos suficientes.
+  none,
+
+  /// Postura sostenida (Yo, Bien, Gracias, Comer, Mal, Por favor…).
+  hold,
+
+  /// Vaivén lateral (Hola, Cómo, No, Adiós).
+  waveX,
+
+  /// Movimiento arriba-abajo (Sí).
+  waveY,
+
+  /// Transición rápida entre dos señas ("movement epenthesis"): NO es una
+  /// seña y no se clasifica.
+  transition,
+
+  /// Movimiento lento que aún no se define.
+  moving,
+}
+
+/// Lo que el motor "entiende" en este instante (para el panel de
+/// entendimiento y para depurar).
+class SignUnderstanding {
+  final MotionKind motion;
+
+  /// Velocidad de la mano (anchos de hombro por segundo).
+  final double speed;
+
+  /// Frames por segundo que realmente llegan al clasificador.
+  final double fps;
+
+  /// Señas con mayor evidencia acumulada (0..1), de mayor a menor.
+  final List<(String, double)> top;
+
+  const SignUnderstanding({
+    this.motion = MotionKind.none,
+    this.speed = 0,
+    this.fps = 0,
+    this.top = const [],
+  });
+}
+
 /// Estado del tracker para calibrar en vivo: qué ve la cámara ahora.
 class TrackerDiagnostics {
   /// ML Kit ve hombros y cara en este frame.
@@ -212,15 +257,52 @@ class SignDetectionService {
   final ValueNotifier<HandPointsFrame?> points =
       ValueNotifier<HandPointsFrame?>(null);
 
-  /// Votos de la seña actual.
-  final Map<String, int> _votes = {};
-  int _gestureFrames = 0;
   String? _lastEmitted;
   DateTime _lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
 
-  /// Confirmación rápida: 2 frames bastan (~150 ms) para que fluya.
-  static const int _minGestureFrames = 2;
-  static const int _votesToConfirm = 2;
+  // ---- Motor de señas (todo en milisegundos: igual a 5 fps que a 30 fps)
+
+  /// Marca de tiempo de cada muestra de [_history].
+  final List<int> _times = [];
+
+  /// Evidencia acumulada por seña (EMA con constante de tiempo [_tauMs]).
+  final Map<String, double> _evidence = {};
+  static const double _tauMs = 260;
+
+  /// Seña líder y desde cuándo lo es (para exigir un tiempo mínimo).
+  String? _leader;
+  int _leaderSinceMs = 0;
+
+  /// Para emitir: evidencia ≥ [_commitLevel], ventaja sobre la segunda
+  /// ≥ [_commitMargin] y líder durante ≥ [_holdDwellMs] / [_moveDwellMs].
+  static const double _commitLevel = 0.55;
+  static const double _commitMargin = 0.15;
+  static const int _holdDwellMs = 380;
+  static const int _moveDwellMs = 220;
+
+  /// Ventanas de análisis.
+  static const int _motionWindowMs = 750;
+  static const int _speedWindowMs = 240;
+
+  /// Por encima de esta velocidad sin oscilación = transición.
+  static const double _transitionSpeed = 1.6;
+
+  int _lastFrameMs = 0;
+  double _fps = 0;
+
+  /// Panel de entendimiento: qué movimiento ve y qué señas evalúa.
+  final ValueNotifier<SignUnderstanding> understanding =
+      ValueNotifier(const SignUnderstanding());
+
+  static const _staticSigns = {
+    'Yo',
+    'Bien',
+    'Gracias',
+    'Comer',
+    'Mal',
+    'Por favor',
+    'Dolor',
+  };
 
   List<String> _mslTerms = const [];
   List<String> _quickPhrases = const [];
@@ -293,11 +375,12 @@ class SignDetectionService {
   }
 
   void _resetGesture() {
-    _votes.clear();
-    _gestureFrames = 0;
     _history.clear();
+    _times.clear();
     _smoothX.clear();
     _smoothY.clear();
+    _evidence.clear();
+    _leader = null;
   }
 
   /// Pérdida de manos: solo reinicia si dura más de [_maxMissFrames].
@@ -309,8 +392,9 @@ class SignDetectionService {
     }
   }
 
-  void _pushSample(_HandPose sample) {
+  void _pushSample(_HandPose sample, int nowMs) {
     _history.add(sample);
+    _times.add(nowMs);
     final x = sample.activeHandX;
     final y = sample.activeHandY;
     if (_smoothX.isEmpty) {
@@ -320,8 +404,10 @@ class SignDetectionService {
       _smoothX.add(_emaAlpha * x + (1 - _emaAlpha) * _smoothX.last);
       _smoothY.add(_emaAlpha * y + (1 - _emaAlpha) * _smoothY.last);
     }
-    if (_history.length > 14) {
+    // Guardar ~1.5 s (o 45 muestras) de historia.
+    while (_history.length > 45 || (nowMs - _times.first) > 1500) {
       _history.removeAt(0);
+      _times.removeAt(0);
       _smoothX.removeAt(0);
       _smoothY.removeAt(0);
     }
@@ -438,34 +524,47 @@ class SignDetectionService {
         );
       }
 
+      final nowMs = now.millisecondsSinceEpoch;
       _missFrames = 0;
-      _pushSample(sample);
-      _gestureFrames++;
-      if (_smoothX.length >= 5 &&
-          _horizontalAmp() < 0.08 &&
-          _verticalAmp() < 0.10) {
-        _pausedSinceCommit = true;
-      }
+      _trackFps(nowMs);
+      _pushSample(sample, nowMs);
 
-      final guess = _classify(sample);
-      if (guess != null) {
-        _votes[guess.phrase] = (_votes[guess.phrase] ?? 0) + 1;
-      }
+      final m = _motion(nowMs);
+      if (m.kind == MotionKind.hold) _pausedSinceCommit = true;
 
-      final best = _bestVote();
+      // Transición entre señas: no aporta evidencia a ninguna.
+      final scores = m.kind == MotionKind.transition
+          ? const <String, double>{}
+          : _score(sample, m);
+      _integrate(scores, nowMs);
+
+      final ranked = _evidence.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      understanding.value = SignUnderstanding(
+        motion: m.kind,
+        speed: m.speed,
+        fps: _fps,
+        top: [for (final e in ranked.take(3)) (e.key, e.value)],
+      );
+
+      final best = ranked.isEmpty ? null : ranked.first;
+      final second = ranked.length > 1 ? ranked[1].value : 0.0;
       if (best != null &&
-          (_votes[best]! >= _votesToConfirm) &&
-          _gestureFrames >= _minGestureFrames) {
-        return _commit(best);
+          best.value >= _commitLevel &&
+          best.value - second >= _commitMargin &&
+          best.key == _leader &&
+          nowMs - _leaderSinceMs >=
+              (_staticSigns.contains(best.key) ? _holdDwellMs : _moveDwellMs)) {
+        return _commit(best.key, best.value);
       }
 
       return SignDetectionResult(
         phrase: '',
-        confidence: 0,
+        confidence: best?.value ?? 0,
         handsVisible: true,
         bodyVisible: true,
         status: 'manos',
-        candidate: best ?? '',
+        candidate: (best != null && best.value >= 0.3) ? best.key : '',
       );
     } catch (e) {
       debugPrint('SignDetection: $e');
@@ -568,183 +667,242 @@ class SignDetectionService {
     _luma = _luma < 0 ? v : _luma * 0.6 + v * 0.4;
   }
 
-  String? _bestVote() {
-    if (_votes.isEmpty) return null;
-    var best = _votes.entries.first;
-    for (final e in _votes.entries) {
-      if (e.value > best.value) best = e;
+  // ===================================================================
+  // Motor de señas
+  //
+  // 1. Segmentación: cada instante se etiqueta como Hold (postura quieta),
+  //    WaveX / WaveY (movimiento de la seña) o Transition (la mano viaja
+  //    rápido de una seña a otra: "movement epenthesis", no es seña).
+  // 2. Puntuación: cada seña recibe un puntaje continuo 0..1 =
+  //    zona × movimiento × forma de mano. Nada de "gana el primer if".
+  // 3. Integración temporal: la evidencia de cada seña es una media móvil
+  //    en TIEMPO (τ = 260 ms), igual a 5 fps que a 30 fps.
+  // 4. Decisión con margen: se emite solo si la mejor supera a la segunda
+  //    por ≥ 0.15 y lleva liderando un tiempo mínimo. Ambigüedad → espera.
+  // ===================================================================
+
+  void _trackFps(int nowMs) {
+    if (_lastFrameMs > 0) {
+      final dt = nowMs - _lastFrameMs;
+      if (dt > 0 && dt < 2000) {
+        final inst = 1000 / dt;
+        _fps = _fps == 0 ? inst : _fps * 0.85 + inst * 0.15;
+      }
     }
-    if (best.value < 1) return null;
-    return best.key;
+    _lastFrameMs = nowMs;
   }
 
-  SignDetectionResult _commit(String phrase) {
+  /// Índice de la primera muestra dentro de los últimos [ms].
+  int _startWithin(int nowMs, int ms) {
+    var i = _times.length - 1;
+    while (i > 0 && nowMs - _times[i - 1] <= ms) {
+      i--;
+    }
+    return i;
+  }
+
+  ({
+    MotionKind kind,
+    double ampX,
+    double ampY,
+    int peaksX,
+    double speed,
+  }) _motion(int nowMs) {
+    if (_smoothX.length < 3) {
+      return (
+        kind: MotionKind.none,
+        ampX: 0.0,
+        ampY: 0.0,
+        peaksX: 0,
+        speed: 0.0,
+      );
+    }
+    final a = _startWithin(nowMs, _motionWindowMs);
+    final xs = _smoothX.sublist(a);
+    final ys = _smoothY.sublist(a);
+    final ampX = xs.reduce(max) - xs.reduce(min);
+    final ampY = ys.reduce(max) - ys.reduce(min);
+
+    // Cambios de dirección reales (ignora temblor < 0.025).
+    var peaks = 0;
+    var lastDir = 0;
+    for (var k = 1; k < xs.length; k++) {
+      final d = xs[k] - xs[k - 1];
+      if (d.abs() < 0.025) continue;
+      final dir = d > 0 ? 1 : -1;
+      if (lastDir != 0 && dir != lastDir) peaks++;
+      lastDir = dir;
+    }
+
+    // Velocidad reciente (anchos de hombro / s).
+    final b = _startWithin(nowMs, _speedWindowMs);
+    final dtMs = _times.last - _times[b];
+    final dist = Offset(
+      _smoothX.last - _smoothX[b],
+      _smoothY.last - _smoothY[b],
+    ).distance;
+    final speed = dtMs > 0 ? dist / (dtMs / 1000) : 0.0;
+
+    final MotionKind kind;
+    if (peaks >= 1 && ampX >= 0.06 && ampX >= ampY * 0.8) {
+      kind = MotionKind.waveX;
+    } else if (ampY >= 0.12 && ampY > ampX * 1.2) {
+      kind = MotionKind.waveY;
+    } else if (speed > _transitionSpeed) {
+      kind = MotionKind.transition;
+    } else if (ampX < 0.10 && ampY < 0.12) {
+      kind = MotionKind.hold;
+    } else {
+      kind = MotionKind.moving;
+    }
+    return (kind: kind, ampX: ampX, ampY: ampY, peaksX: peaks, speed: speed);
+  }
+
+  /// Rampa lineal 0→1 entre [lo] y [hi].
+  static double _ramp(double v, double lo, double hi) =>
+      ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+
+  static double _b(bool v, [double no = 0.0]) => v ? 1.0 : no;
+
+  /// Puntaje 0..1 de cada seña = zona × movimiento × forma.
+  Map<String, double> _score(
+    _HandPose s,
+    ({
+      MotionKind kind,
+      double ampX,
+      double ampY,
+      int peaksX,
+      double speed,
+    }) m,
+  ) {
+    final shape = s.activeShape;
+    // Sin MediaPipe la forma es desconocida: factor neutro 0.75.
+    double shapeIs(bool Function(HandShape) f, [double unknown = 0.75]) =>
+        shape == null ? unknown : (f(shape) ? 1.0 : 0.15);
+
+    final hold = _b(m.kind == MotionKind.hold);
+    final waveX =
+        m.kind == MotionKind.waveX ? min(1.0, 0.5 + 0.5 * m.peaksX) : 0.0;
+    final waveY = _b(m.kind == MotionKind.waveY);
+
+    // Vaivén amplio vs corto: bandas que se solapan (no un corte duro).
+    final wide = _ramp(m.ampX, 0.13, 0.24);
+    final short = _ramp(m.ampX, 0.05, 0.09) * (1 - _ramp(m.ampX, 0.19, 0.27));
+
+    final high = s.handAboveHead;
+    final face = s.handInFaceZone;
+    final open = shapeIs((h) => h.isOpen);
+    final notFist = shapeIs((h) => !h.isFist, 0.85);
+    final pointing = shapeIs((h) => h.indexOnly, 0.6);
+    final bunched = shapeIs((h) => !h.isOpen, 0.7);
+
+    final out = <String, double>{
+      // Mano abierta arriba / junto a la cabeza + vaivén amplio.
+      'Hola': (high ? 1.0 : (face ? 0.7 : 0.0)) * waveX * wide * open,
+      // Mano frente a la cara + vaivén corto.
+      'Cómo': _b(face) * _b(!high, 0.3) * waveX * short * notFist,
+      // Media altura (más baja que Hola) + vaivén.
+      'Adiós': _b(s.handUp && !high && !face) * waveX * wide * open,
+      // Pecho + vaivén amplio con mano plana.
+      'No': _b(s.handMid) * waveX * _ramp(m.ampX, 0.16, 0.26) * open,
+      // Pulgar arriba (con dedos) o pecho + arriba/abajo.
+      'Sí': max(
+        (shape?.thumbUp ?? false) && !high
+            ? (m.kind == MotionKind.transition ? 0.0 : 0.95)
+            : 0.0,
+        _b(s.handMid) * waveY * _ramp(m.ampY, 0.12, 0.2),
+      ),
+      // Índice al centro del pecho, quieta.
+      'Yo': _b(s.handOnChest) * hold * pointing,
+      // Pecho/hombro, palma abierta al frente, quieta.
+      'Bien': _b(s.handMid && !face && !s.handOnChest, 0.4) *
+          _b(s.handMid) *
+          hold *
+          open *
+          (1 - (shape?.indexOnly ?? false ? 0.8 : 0.0)),
+      // Mano cerca de la cara/barbilla, quieta.
+      'Gracias': _b(face && !high && !s.handNearMouth, 0.5) *
+          _b(face) *
+          hold *
+          notFist,
+      // Mano en la boca, dedos juntos, quieta.
+      'Comer': _b(s.handNearMouth) * hold * bunched,
+      // Mano baja delante de la cadera, quieta.
+      'Mal': _b(s.handLow) * hold,
+      // Dos manos juntas frente al cuerpo, quietas.
+      'Por favor': _b(s.handsTogether && !s.handLow && !s.bothHandsMid) * hold,
+      'Dolor': _b(s.handsTogether && s.bothHandsMid) * hold,
+    };
+    return out;
+  }
+
+  /// Evidencia(t) = evidencia(t−dt)·(1−α) + puntaje·α, α = 1 − e^(−dt/τ).
+  void _integrate(Map<String, double> scores, int nowMs) {
+    final dt = _times.length >= 2
+        ? (_times.last - _times[_times.length - 2]).clamp(1, 500)
+        : 60;
+    final alpha = 1 - exp(-dt / _tauMs);
+    final keys = {..._evidence.keys, ...scores.keys};
+    for (final k in keys) {
+      final prev = _evidence[k] ?? 0.0;
+      final next = prev * (1 - alpha) + (scores[k] ?? 0.0) * alpha;
+      if (next < 0.02) {
+        _evidence.remove(k);
+      } else {
+        _evidence[k] = next;
+      }
+    }
+    // Seguir al líder (para el tiempo mínimo de permanencia).
+    String? lead;
+    var bestV = 0.0;
+    _evidence.forEach((k, v) {
+      if (v > bestV) {
+        bestV = v;
+        lead = k;
+      }
+    });
+    if (lead != _leader) {
+      _leader = lead;
+      _leaderSinceMs = nowMs;
+    }
+  }
+
+  /// Emite la seña con anti-repetición: misma seña 1.4 s; vaivén → otro
+  /// vaivén sin pausa (Hola ↔ Cómo) 1.6 s; seña distinta 450 ms.
+  SignDetectionResult _commit(String phrase, double evidence) {
     final now = DateTime.now();
-    // Misma seña: cooldown más largo para no repetir "Hola Hola Hola".
-    // Seña distinta: casi inmediato, así "Hola → Cómo → Yo → Bien" fluye.
     final same = phrase == _lastEmitted;
     final waveSwap = !same &&
         !_pausedSinceCommit &&
         _waveFamily.contains(phrase) &&
         _waveFamily.contains(_lastEmitted);
-    // Vaivén → otro vaivén sin pausa (Hola ↔ Cómo): esperar 1.6 s.
     final wait = same
         ? const Duration(milliseconds: 1400)
         : (waveSwap
             ? const Duration(milliseconds: 1600)
             : const Duration(milliseconds: 450));
     if (now.difference(_lastEmit) < wait) {
-      return const SignDetectionResult(
+      return SignDetectionResult(
         phrase: '',
-        confidence: 0.5,
+        confidence: evidence,
         handsVisible: true,
         status: 'seña',
+        candidate: phrase,
       );
     }
 
     _lastEmitted = phrase;
     _lastEmit = now;
     _pausedSinceCommit = false;
-    final conf =
-        ((_votes[phrase] ?? 1) / max(1, _gestureFrames)).clamp(0.55, 0.95);
-
     _resetGesture();
 
     return SignDetectionResult(
       phrase: phrase,
-      confidence: conf.toDouble(),
+      confidence: evidence.clamp(0.0, 1.0),
       handsVisible: true,
       bodyVisible: true,
       status: 'seña',
     );
-  }
-
-  /// Clasifica según la guía visual `assets/msl/guia_senas.png`.
-  SignDetectionResult? _classify(_HandPose s) {
-    if (_history.length < 2) return null;
-
-    final wave = _horizontalAmp(); // vaivén lateral (unidades de hombro)
-    final nod = _verticalAmp(); // movimiento arriba/abajo
-    final peaks = _wavePeaks(); // cambios de dirección reales
-    final still = wave < 0.11 && nod < 0.13;
-    final high = s.handAboveHead;
-    final face = s.handInFaceZone;
-
-    // Forma de la mano (MediaPipe, 21 puntos). null = solo ML Kit Pose:
-    // en ese caso las reglas se comportan como antes.
-    final shape = s.activeShape;
-    final open = shape?.isOpen ?? true;
-    final fist = shape?.isFist ?? false;
-    final pointing = shape?.indexOnly ?? false;
-
-    // 0) SÍ — pulgar arriba (con dedos se ve directo, sin esperar el ↑↓)
-    if (shape != null && shape.thumbUp && !high) {
-      return _hit('Sí', nod >= 0.08 ? 0.92 : 0.86);
-    }
-
-    // 1) HOLA — mano abierta arriba, junto a la cabeza + vaivén amplio
-    if ((high || face) && open && wave >= 0.20 && peaks >= 1) {
-      return _hit('Hola', 0.94);
-    }
-    if (high && open && wave >= 0.14) {
-      return _hit('Hola', 0.85);
-    }
-
-    // 2) ¿CÓMO ESTÁS? — mano frente a la cara + vaivén CORTO
-    if (face && !fist && wave >= 0.07 && wave < 0.20) {
-      return _hit('Cómo', 0.9);
-    }
-
-    // 3) COMER — mano en la boca, quieta, dedos juntos (no plana)
-    if (s.handNearMouth && still && !(shape?.isOpen ?? false)) {
-      return _hit('Comer', 0.8);
-    }
-
-    // 4) GRACIAS — mano cerca de la cara SIN vaivén
-    if (face && !high && still && !fist) {
-      return _hit('Gracias', 0.84);
-    }
-
-    // 5) POR FAVOR / DOLOR — las dos manos juntas frente al cuerpo, quietas
-    if (s.handsTogether && !s.handLow && still) {
-      return _hit(s.bothHandsMid ? 'Dolor' : 'Por favor', 0.8);
-    }
-
-    // 6) YO — índice apuntando al centro del pecho, quieta
-    if (s.handOnChest && still && (shape == null || pointing)) {
-      return _hit('Yo', shape == null ? 0.9 : 0.95);
-    }
-
-    // 7) NO — mano plana en el pecho + vaivén horizontal amplio (flecha ↔)
-    if (s.handMid && open && wave >= 0.22 && peaks >= 1 && nod < wave) {
-      return _hit('No', 0.9);
-    }
-
-    // 8) SÍ — pecho + movimiento vertical (flecha ↑↓), pulgar/puño
-    if (s.handMid && nod >= 0.18 && wave < 0.16) {
-      return _hit('Sí', 0.88);
-    }
-    if (s.thumbUp && nod >= 0.12) {
-      return _hit('Sí', 0.85);
-    }
-
-    // 9) BIEN — pecho/hombro, palma abierta al frente, QUIETA
-    if (s.handMid && !face && still && open && !pointing) {
-      return _hit('Bien', shape == null ? 0.84 : 0.9);
-    }
-
-    // 10) MAL — mano baja junto a la cadera, quieta
-    if (s.handLow && still) {
-      return _hit('Mal', 0.8);
-    }
-
-    // 11) ADIÓS — media altura + vaivén (más bajo que Hola)
-    if (s.handUp && !high && !face && open && wave >= 0.18 && peaks >= 1) {
-      return _hit('Adiós', 0.8);
-    }
-
-    return null;
-  }
-
-  SignDetectionResult _hit(String phrase, double confidence) {
-    return SignDetectionResult(
-      phrase: phrase,
-      confidence: confidence,
-      handsVisible: true,
-      status: 'seña',
-    );
-  }
-
-  /// Cuenta cambios de dirección horizontales (vaivén real).
-  int _wavePeaks() {
-    if (_history.length < 4) return 0;
-    final xs = _windowOf(_smoothX);
-    var peaks = 0;
-    for (var i = 2; i < xs.length; i++) {
-      final d1 = xs[i - 1] - xs[i - 2];
-      final d2 = xs[i] - xs[i - 1];
-      if (d1.abs() < 0.03 || d2.abs() < 0.03) continue;
-      if (d1.sign != d2.sign) peaks++;
-    }
-    return peaks;
-  }
-
-  /// Últimos 8 valores suavizados.
-  List<double> _windowOf(List<double> values) {
-    final start = max(0, values.length - 8);
-    return values.sublist(start);
-  }
-
-  double _horizontalAmp() {
-    if (_smoothX.length < 2) return 0;
-    final xs = _windowOf(_smoothX);
-    return xs.reduce(max) - xs.reduce(min);
-  }
-
-  double _verticalAmp() {
-    if (_smoothY.length < 2) return 0;
-    final ys = _windowOf(_smoothY);
-    return ys.reduce(max) - ys.reduce(min);
   }
 
   ({double width, double height}) _rotatedSize(
