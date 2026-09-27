@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 
 import 'package:conecta_lsb/services/sign_detection_service.dart';
 
-/// Dibuja los puntos de las manos (muñeca, pulgar, índice, meñique) y los
-/// brazos sobre la vista de cámara, igual que la guía visual.
+/// Dibuja los puntos de las manos sobre la vista de cámara: esqueleto de
+/// dedos (MediaPipe, 21 puntos) o, si no está, muñeca/pulgar/índice/meñique
+/// de ML Kit Pose, igual que la guía visual.
 class HandPointsOverlay extends StatelessWidget {
   final ValueListenable<HandPointsFrame?> frames;
 
@@ -66,6 +67,12 @@ class _HandPointsPainter extends CustomPainter {
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round;
 
+    // Con MediaPipe: brazos de ML Kit + esqueleto completo de los dedos.
+    if (frame.hands.isNotEmpty) {
+      _paintWithFingers(canvas, mapped, map, bone);
+      return;
+    }
+
     for (final b in HandPointsFrame.bones) {
       final a = mapped[b[0]];
       final c = mapped[b[1]];
@@ -87,6 +94,48 @@ class _HandPointsPainter extends CustomPainter {
         canvas.drawCircle(p, 5, handDot);
       } else {
         canvas.drawCircle(p, 4, bodyDot);
+      }
+    }
+  }
+
+  void _paintWithFingers(
+    Canvas canvas,
+    List<Offset?> body,
+    Offset? Function(Offset?) map,
+    Paint bone,
+  ) {
+    for (final b in HandPointsFrame.armBones) {
+      final a = body[b[0]];
+      final c = body[b[1]];
+      if (a == null || c == null) continue;
+      canvas.drawLine(a, c, bone);
+    }
+    final bodyDot = Paint()..color = Colors.white.withValues(alpha: 0.7);
+    for (final i in const [0, 1, 6, 7]) {
+      final p = body[i];
+      if (p != null) canvas.drawCircle(p, 4, bodyDot);
+    }
+
+    final finger = Paint()
+      ..color = const Color(0xff2ECC71)
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round;
+    final joint = Paint()..color = Colors.white;
+    final tip = Paint()..color = const Color(0xff2ECC71);
+
+    for (final hand in frame.hands) {
+      final pts = hand.map(map).toList();
+      for (final b in HandPointsFrame.fingerBones) {
+        final a = pts[b[0]];
+        final c = pts[b[1]];
+        if (a == null || c == null) continue;
+        canvas.drawLine(a, c, finger);
+      }
+      for (var i = 0; i < pts.length; i++) {
+        final p = pts[i];
+        if (p == null) continue;
+        final isTip = i == 4 || i == 8 || i == 12 || i == 16 || i == 20;
+        canvas.drawCircle(p, isTip ? 5 : 3, isTip ? tip : joint);
       }
     }
   }

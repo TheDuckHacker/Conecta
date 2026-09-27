@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 
+import 'hand_tracker.dart';
+
 /// Resultado de detección de señas en español (enfoque solo manos).
 class SignDetectionResult {
   final String phrase;
@@ -34,7 +36,32 @@ class HandPointsFrame {
   final List<Offset?> points;
   final double aspect; // ancho / alto de la imagen rotada
 
-  const HandPointsFrame({required this.points, required this.aspect});
+  /// Esqueleto de dedos (21 puntos por mano) de MediaPipe Hand Landmarker.
+  final List<List<Offset>> hands;
+
+  const HandPointsFrame({
+    required this.points,
+    required this.aspect,
+    this.hands = const [],
+  });
+
+  /// Conexiones de los 21 puntos de MediaPipe (dedos + palma).
+  static const List<List<int>> fingerBones = [
+    [0, 1], [1, 2], [2, 3], [3, 4], //
+    [0, 5], [5, 6], [6, 7], [7, 8], //
+    [5, 9], [9, 10], [10, 11], [11, 12], //
+    [9, 13], [13, 14], [14, 15], [15, 16], //
+    [13, 17], [0, 17], [17, 18], [18, 19], [19, 20],
+  ];
+
+  /// Huesos del brazo (hombro-codo-muñeca) para dibujar junto a los dedos.
+  static const List<List<int>> armBones = [
+    [0, 1],
+    [1, 2],
+    [6, 7],
+    [7, 8],
+    [0, 6],
+  ];
 
   /// Índices en [points]: 0..5 mano izquierda, 6..11 mano derecha
   /// (hombro, codo, muñeca, pulgar, índice, meñique).
@@ -67,6 +94,12 @@ class HandPointsFrame {
 /// para que funcione igual de cerca o de lejos de la cámara.
 class SignDetectionService {
   PoseDetector? _detector;
+
+  /// MediaPipe Hand Landmarker: 21 puntos por mano (forma de los dedos).
+  final HandTracker _handTracker = HandTracker();
+
+  /// true si el tracker de dedos (MediaPipe) está activo en este dispositivo.
+  bool get fingerTracking => _handTracker.available;
   bool _busy = false;
   final List<_HandPose> _history = [];
 
@@ -128,6 +161,7 @@ class SignDetectionService {
         model: PoseDetectionModel.base,
       ),
     );
+    await _handTracker.start();
     await _loadVocabulary();
   }
 
@@ -156,6 +190,7 @@ class SignDetectionService {
   Future<void> stop() async {
     await _detector?.close();
     _detector = null;
+    await _handTracker.stop();
     _resetGesture();
     _history.clear();
     points.value = null;
@@ -211,6 +246,8 @@ class SignDetectionService {
     CameraImage image, {
     required CameraDescription camera,
   }) async {
+    // Dedos: MediaPipe corre en paralelo (asíncrono, con su propio límite).
+    _handTracker.feed(image, camera.sensorOrientation);
     if (_detector == null || _busy) return null;
 
     _busy = true;
@@ -246,6 +283,7 @@ class SignDetectionService {
         poses.first,
         imageWidth: rotated.width,
         imageHeight: rotated.height,
+        hands: _handTracker.hands,
       );
 
       points.value = sample?.frame;
@@ -347,26 +385,38 @@ class SignDetectionService {
     final high = s.handAboveHead;
     final face = s.handInFaceZone;
 
+    // Forma de la mano (MediaPipe, 21 puntos). null = solo ML Kit Pose:
+    // en ese caso las reglas se comportan como antes.
+    final shape = s.activeShape;
+    final open = shape?.isOpen ?? true;
+    final fist = shape?.isFist ?? false;
+    final pointing = shape?.indexOnly ?? false;
+
+    // 0) SÍ — pulgar arriba (con dedos se ve directo, sin esperar el ↑↓)
+    if (shape != null && shape.thumbUp && !high) {
+      return _hit('Sí', nod >= 0.08 ? 0.92 : 0.86);
+    }
+
     // 1) HOLA — mano abierta arriba, junto a la cabeza + vaivén amplio
-    if ((high || face) && wave >= 0.20 && peaks >= 1) {
+    if ((high || face) && open && wave >= 0.20 && peaks >= 1) {
       return _hit('Hola', 0.94);
     }
-    if (high && wave >= 0.14) {
+    if (high && open && wave >= 0.14) {
       return _hit('Hola', 0.85);
     }
 
     // 2) ¿CÓMO ESTÁS? — mano frente a la cara + vaivén CORTO
-    if (face && wave >= 0.07 && wave < 0.20) {
+    if (face && !fist && wave >= 0.07 && wave < 0.20) {
       return _hit('Cómo', 0.9);
     }
 
-    // 3) COMER — mano en la boca, quieta
-    if (s.handNearMouth && still) {
+    // 3) COMER — mano en la boca, quieta, dedos juntos (no plana)
+    if (s.handNearMouth && still && !(shape?.isOpen ?? false)) {
       return _hit('Comer', 0.8);
     }
 
     // 4) GRACIAS — mano cerca de la cara SIN vaivén
-    if (face && !high && still) {
+    if (face && !high && still && !fist) {
       return _hit('Gracias', 0.84);
     }
 
@@ -375,13 +425,13 @@ class SignDetectionService {
       return _hit(s.bothHandsMid ? 'Dolor' : 'Por favor', 0.8);
     }
 
-    // 6) YO — índice/mano al centro del pecho, quieta
-    if (s.handOnChest && still) {
-      return _hit('Yo', 0.9);
+    // 6) YO — índice apuntando al centro del pecho, quieta
+    if (s.handOnChest && still && (shape == null || pointing)) {
+      return _hit('Yo', shape == null ? 0.9 : 0.95);
     }
 
-    // 7) NO — pecho + vaivén horizontal amplio (flecha ↔)
-    if (s.handMid && wave >= 0.22 && peaks >= 1 && nod < wave) {
+    // 7) NO — mano plana en el pecho + vaivén horizontal amplio (flecha ↔)
+    if (s.handMid && open && wave >= 0.22 && peaks >= 1 && nod < wave) {
       return _hit('No', 0.9);
     }
 
@@ -393,9 +443,9 @@ class SignDetectionService {
       return _hit('Sí', 0.85);
     }
 
-    // 9) BIEN — pecho/hombro, palma al frente, QUIETA
-    if (s.handMid && !face && still) {
-      return _hit('Bien', 0.84);
+    // 9) BIEN — pecho/hombro, palma abierta al frente, QUIETA
+    if (s.handMid && !face && still && open && !pointing) {
+      return _hit('Bien', shape == null ? 0.84 : 0.9);
     }
 
     // 10) MAL — mano baja junto a la cadera, quieta
@@ -404,7 +454,7 @@ class SignDetectionService {
     }
 
     // 11) ADIÓS — media altura + vaivén (más bajo que Hola)
-    if (s.handUp && !high && !face && wave >= 0.18 && peaks >= 1) {
+    if (s.handUp && !high && !face && open && wave >= 0.18 && peaks >= 1) {
       return _hit('Adiós', 0.8);
     }
 
@@ -549,6 +599,8 @@ class _HandPose {
   final double hipY;
   final bool leftOk;
   final bool rightOk;
+  final HandShape? leftShape;
+  final HandShape? rightShape;
   final HandPointsFrame frame;
 
   const _HandPose({
@@ -570,6 +622,8 @@ class _HandPose {
     required this.hipY,
     required this.leftOk,
     required this.rightOk,
+    this.leftShape,
+    this.rightShape,
     required this.frame,
   });
 
@@ -583,6 +637,9 @@ class _HandPose {
   double get activeSpread => _useLeft ? leftSpread : rightSpread;
   double get activeWristY => _useLeft ? leftWristY : rightWristY;
   double get activeThumbY => _useLeft ? leftThumbY : rightThumbY;
+
+  /// Forma de la mano activa (MediaPipe), si el tracker de dedos la vio.
+  HandShape? get activeShape => _useLeft ? leftShape : rightShape;
 
   /// Mano por encima de la cabeza (zona de saludo).
   bool get handAboveHead => activeHandY < noseY - 0.25;
@@ -632,12 +689,14 @@ class _HandPose {
 
   /// Pulgar arriba con mano cerrada (Sí).
   bool get thumbUp =>
-      activeThumbY < activeWristY - 0.18 && activeSpread < 0.42;
+      activeShape?.thumbUp ??
+      (activeThumbY < activeWristY - 0.18 && activeSpread < 0.42);
 
   static _HandPose? fromPose(
     Pose pose, {
     required double imageWidth,
     required double imageHeight,
+    List<HandShape> hands = const [],
   }) {
     PoseLandmark? lm(PoseLandmarkType t, [double minLikelihood = 0.12]) {
       final p = pose.landmarks[t];
@@ -665,11 +724,33 @@ class _HandPose {
     final ml = lm(PoseLandmarkType.leftMouth, 0.1);
     final mr = lm(PoseLandmarkType.rightMouth, 0.1);
 
-    final leftOk = lw != null || li != null;
-    final rightOk = rw != null || ri != null;
-
     final w = imageWidth <= 0 ? 1.0 : imageWidth;
     final h = imageHeight <= 0 ? 1.0 : imageHeight;
+
+    // Asignar cada mano de MediaPipe al brazo de ML Kit más cercano.
+    HandShape? leftShape;
+    HandShape? rightShape;
+    double distTo(HandShape hs, PoseLandmark? ref) {
+      if (ref == null) return double.infinity;
+      final dx = hs.palm.dx * w - ref.x;
+      final dy = hs.palm.dy * h - ref.y;
+      return sqrt(dx * dx + dy * dy);
+    }
+
+    for (final hs in hands) {
+      final dl = distTo(hs, lw ?? li);
+      final dr = distTo(hs, rw ?? ri);
+      if (dl <= dr && leftShape == null) {
+        leftShape = hs;
+      } else if (rightShape == null) {
+        rightShape = hs;
+      } else {
+        leftShape ??= hs;
+      }
+    }
+
+    final leftOk = lw != null || li != null || leftShape != null;
+    final rightOk = rw != null || ri != null || rightShape != null;
 
     // Escala = ancho de hombros en píxeles → todo es invariante a distancia.
     final dx = ls.x - rs.x;
@@ -704,8 +785,11 @@ class _HandPose {
       return u(sqrt(sx * sx + sy * sy));
     }
 
-    final leftPalm = palm(lw, li, lp, lt);
-    final rightPalm = palm(rw, ri, rp, rt);
+    // Palma de MediaPipe (más precisa) si está; si no, la de ML Kit.
+    ({double x, double y})? shapePalm(HandShape? hs) =>
+        hs == null ? null : (x: hs.palm.dx * w, y: hs.palm.dy * h);
+    final leftPalm = shapePalm(leftShape) ?? palm(lw, li, lp, lt);
+    final rightPalm = shapePalm(rightShape) ?? palm(rw, ri, rp, rt);
     if (leftPalm == null && rightPalm == null) return null;
 
     final shoulderY = u((ls.y + rs.y) / 2);
@@ -732,6 +816,7 @@ class _HandPose {
         norm(rp),
       ],
       aspect: w / h,
+      hands: hands.map((hs) => hs.points).toList(),
     );
 
     return _HandPose(
@@ -753,6 +838,8 @@ class _HandPose {
       hipY: hipY,
       leftOk: leftOk,
       rightOk: rightOk,
+      leftShape: leftShape,
+      rightShape: rightShape,
       frame: frame,
     );
   }
