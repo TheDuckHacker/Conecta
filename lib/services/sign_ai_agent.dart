@@ -92,6 +92,14 @@ class SignLanguageAiAgent {
         _buffer.isNotEmpty) {
       _buffer.clear();
     }
+    // Oscilación A-B-A en pocos segundos (p. ej. Hola ↔ Cómo con un solo
+    // vaivén): es ruido del detector, no una frase nueva.
+    if (_buffer.length >= 2 &&
+        _buffer[_buffer.length - 2] == sign &&
+        _buffer.last != sign &&
+        now.difference(_lastSignAt) < const Duration(seconds: 3)) {
+      return snapshot;
+    }
     _lastSignAt = now;
 
     if (_buffer.isEmpty || _buffer.last != sign) {

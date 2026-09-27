@@ -20,6 +20,9 @@ class HandShape {
 
   HandShape(this.points);
 
+  /// Misma mano con cada punto transformado (rotación / espejo).
+  HandShape map(Offset Function(Offset) f) => HandShape(points.map(f).toList());
+
   Offset get wrist => points[0];
 
   /// Centro de la palma (muñeca + nudillos).

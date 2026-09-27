@@ -179,6 +179,21 @@ class SignDetectionService {
 
   int _lumaTick = 0;
   double _luma = -1;
+
+  /// MediaPipe devuelve los puntos SIN rotar (coordenadas del sensor).
+  /// Se autocalibra la orientación comparando su muñeca con la de ML Kit
+  /// en 8 combinaciones (giro k·90° horario, con/sin espejo).
+  int _mpRotKey = -1;
+  final List<double> _mpErr = List<double>.filled(8, 0);
+  int _mpSamples = 0;
+  int? _mpCombo;
+
+  /// Señas de vaivén: un mismo movimiento continuo puede cruzar el umbral
+  /// entre ellas y alternar Hola ↔ Cómo en bucle.
+  static const _waveFamily = {'Hola', 'Cómo', 'Adiós', 'No'};
+
+  /// La mano se detuvo (o salió) desde la última seña emitida.
+  bool _pausedSinceCommit = true;
   bool _busy = false;
   final List<_HandPose> _history = [];
 
@@ -271,6 +286,7 @@ class SignDetectionService {
     _detector = null;
     await _handTracker.stop();
     _bodyRef = null;
+    _mpRotKey = -1;
     _resetGesture();
     _history.clear();
     points.value = null;
@@ -287,7 +303,10 @@ class SignDetectionService {
   /// Pérdida de manos: solo reinicia si dura más de [_maxMissFrames].
   void _onHandsMissing() {
     _missFrames++;
-    if (_missFrames >= _maxMissFrames) _resetGesture();
+    if (_missFrames >= _maxMissFrames) {
+      _resetGesture();
+      _pausedSinceCommit = true;
+    }
   }
 
   void _pushSample(_HandPose sample) {
@@ -344,7 +363,6 @@ class SignDetectionService {
       }
 
       final poses = await _detector!.processImage(input);
-      final hands = _handTracker.hands;
       _sampleLuma(image);
 
       // ML Kit devuelve los puntos sobre la imagen YA rotada: en vertical hay
@@ -355,6 +373,13 @@ class SignDetectionService {
       // referencia (solo si hay manos que clasificar y es reciente).
       final now = DateTime.now();
       final livePose = poses.isEmpty ? null : poses.first;
+      final hands = _orientHands(
+        _handTracker.hands,
+        rotation.rawValue,
+        livePose,
+        rotated.width,
+        rotated.height,
+      );
       final liveBody = livePose != null && _hasBody(livePose);
       if (liveBody) {
         _bodyRef = _bodyOnly(livePose);
@@ -416,6 +441,11 @@ class SignDetectionService {
       _missFrames = 0;
       _pushSample(sample);
       _gestureFrames++;
+      if (_smoothX.length >= 5 &&
+          _horizontalAmp() < 0.08 &&
+          _verticalAmp() < 0.10) {
+        _pausedSinceCommit = true;
+      }
 
       final guess = _classify(sample);
       if (guess != null) {
@@ -443,6 +473,67 @@ class SignDetectionService {
     } finally {
       _busy = false;
     }
+  }
+
+  static Offset _orient(Offset p, int combo) {
+    var x = p.dx;
+    var y = p.dy;
+    switch (combo % 4) {
+      case 1:
+        (x, y) = (1 - y, x);
+      case 2:
+        (x, y) = (1 - x, 1 - y);
+      case 3:
+        (x, y) = (y, 1 - x);
+    }
+    if (combo >= 4) x = 1 - x;
+    return Offset(x, y);
+  }
+
+  /// Lleva las manos de MediaPipe al mismo marco que ML Kit (imagen rotada).
+  List<HandShape> _orientHands(
+    List<HandShape> raw,
+    int rotDeg,
+    Pose? pose,
+    double w,
+    double h,
+  ) {
+    if (raw.isEmpty) return raw;
+    if (rotDeg != _mpRotKey) {
+      _mpRotKey = rotDeg;
+      _mpErr.fillRange(0, 8, 0);
+      _mpSamples = 0;
+      _mpCombo = null;
+    }
+    if (_mpCombo == null && pose != null) {
+      final wrists = [PoseLandmarkType.leftWrist, PoseLandmarkType.rightWrist]
+          .map((t) => pose.landmarks[t])
+          .whereType<PoseLandmark>()
+          .where((l) => l.likelihood >= 0.5)
+          .map((l) => Offset(l.x / w, l.y / h))
+          .toList();
+      if (wrists.isNotEmpty) {
+        for (var c = 0; c < 8; c++) {
+          for (final hs in raw) {
+            final p = _orient(hs.points[0], c);
+            _mpErr[c] += wrists.map((wr) => (p - wr).distance).reduce(min);
+          }
+        }
+        if (++_mpSamples >= 8) {
+          var best = 0;
+          for (var c = 1; c < 8; c++) {
+            if (_mpErr[c] < _mpErr[best]) best = c;
+          }
+          _mpCombo = best;
+          debugPrint('HandTracker orientación calibrada: combo $best '
+              '(rot ML Kit $rotDeg°, error ${(_mpErr[best] / _mpSamples).toStringAsFixed(3)})');
+        }
+      }
+    }
+    // Mientras calibra: girar como ML Kit (el ejemplo del plugin rota por
+    // sensorOrientation al dibujar).
+    final combo = _mpCombo ?? (rotDeg ~/ 90) % 4;
+    return raw.map((hs) => hs.map((p) => _orient(p, combo))).toList();
   }
 
   bool _hasBody(Pose pose) {
@@ -492,9 +583,16 @@ class SignDetectionService {
     // Misma seña: cooldown más largo para no repetir "Hola Hola Hola".
     // Seña distinta: casi inmediato, así "Hola → Cómo → Yo → Bien" fluye.
     final same = phrase == _lastEmitted;
+    final waveSwap = !same &&
+        !_pausedSinceCommit &&
+        _waveFamily.contains(phrase) &&
+        _waveFamily.contains(_lastEmitted);
+    // Vaivén → otro vaivén sin pausa (Hola ↔ Cómo): esperar 1.6 s.
     final wait = same
         ? const Duration(milliseconds: 1400)
-        : const Duration(milliseconds: 220);
+        : (waveSwap
+            ? const Duration(milliseconds: 1600)
+            : const Duration(milliseconds: 450));
     if (now.difference(_lastEmit) < wait) {
       return const SignDetectionResult(
         phrase: '',
@@ -506,6 +604,7 @@ class SignDetectionService {
 
     _lastEmitted = phrase;
     _lastEmit = now;
+    _pausedSinceCommit = false;
     final conf =
         ((_votes[phrase] ?? 1) / max(1, _gestureFrames)).clamp(0.55, 0.95);
 

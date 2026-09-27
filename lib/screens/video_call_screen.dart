@@ -74,7 +74,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   Uint8List? _remoteJpeg;
   StreamSubscription? _frameListen;
   Timer? _signSpeakTimer;
-  String _lastSpokenSign = '';
 
   CallUserRole _role = CallUserRole.deaf;
   String _localCaption = '';
@@ -316,17 +315,21 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   void _scheduleSignSpeak() {
     _signSpeakTimer?.cancel();
-    _signSpeakTimer = Timer(const Duration(milliseconds: 850), () async {
+    // 1.5 s sin señas nuevas = frase terminada: se envía y se empieza otra.
+    _signSpeakTimer = Timer(const Duration(milliseconds: 1500), () async {
       final agent = await SignLanguageAiAgent.instance.flush();
       if (!mounted) return;
       final sentence = agent.sentence.trim();
-      if (sentence.isEmpty || sentence == _lastSpokenSign) return;
-      _lastSpokenSign = sentence;
+      if (sentence.isEmpty) return;
+      final signs = agent.signs.map(SignGuide.labelFor).toList();
+      // Frase nueva: sin esto el buffer seguía creciendo y se repetía
+      // "Hola, ¿cómo estás? Hola, ¿cómo estás?…". El banner la conserva.
+      SignLanguageAiAgent.instance.clear();
       unawaited(_emitLocalCaption(
         sentence,
         role: 'sign',
         speak: true,
-        signs: agent.signs.map(SignGuide.labelFor).toList(),
+        signs: signs,
       ));
     });
   }
@@ -656,7 +659,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     if (role == _role) return;
     await _voice.stopListening();
     SignLanguageAiAgent.instance.clear();
-    _lastSpokenSign = '';
     _displaySigns = '';
     _candidate = '';
 

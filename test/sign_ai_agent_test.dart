@@ -29,4 +29,17 @@ void main() {
       'Hola, yo quiero comer.',
     );
   });
+
+  test('un vaivén que oscila Hola ↔ Cómo no repite la frase en bucle',
+      () async {
+    expect(
+      await compose(['Hola', 'Cómo', 'Hola', 'Cómo', 'Hola']),
+      'Hola, ¿cómo estás?',
+    );
+    // Y después de la oscilación, la frase sigue normalmente.
+    expect(
+      await compose(['Hola', 'Cómo', 'Hola', 'Yo', 'Bien']),
+      'Hola, ¿cómo estás? Yo estoy bien.',
+    );
+  });
 }
