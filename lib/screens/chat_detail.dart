@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:appwrite/models.dart';
 import 'package:appwrite/appwrite.dart' show RealtimeSubscription;
 import 'package:conecta_lsb/services/chat_service.dart';
@@ -55,10 +56,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _isFetching = false;
   bool _typingUpdateInFlight = false;
 
-  static const _accent = Color(0xff37C8F2);
-  static const _textDark = Color(0xff1A3A4A);
-  static const _textMuted = Color(0xff5A7A8A);
-  static const _headerBg = Color(0xff2BB8E0);
+  static const _accent = AppColors.brand;
+  static const _textDark = AppColors.ink;
+  static const _textMuted = AppColors.inkMuted;
+  static const _headerBg = AppColors.brand;
 
   @override
   void initState() {
@@ -388,7 +389,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 const SizedBox(height: 16),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xff37C8F2),
+                    backgroundColor: AppColors.brand,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -404,7 +405,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 const SizedBox(height: 10),
                 OutlinedButton(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xff37C8F2),
+                    foregroundColor: AppColors.brand,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
@@ -500,7 +501,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xffE8F4F8),
+      backgroundColor: AppColors.brandSoft,
       body: Column(
         children: [
           _buildHeader(),
@@ -563,7 +564,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             height: 8,
                             margin: const EdgeInsets.only(right: 6),
                             decoration: BoxDecoration(
-                              color: _isOnline ? const Color(0xff2ECC71) : Colors.white70,
+                              color: _isOnline ? AppColors.success : Colors.white70,
                               shape: BoxShape.circle,
                               border: Border.all(color: Colors.white, width: 1),
                             ),
@@ -806,7 +807,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xffF0F7FA),
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(26),
                   ),
                   child: TextField(

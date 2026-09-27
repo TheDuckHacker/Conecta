@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/screens/chat.dart';
 
@@ -72,7 +73,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             isSelected ? FontWeight.bold : FontWeight.normal),
                   ),
                   trailing: isSelected
-                      ? const Icon(Icons.check_circle, color: Color(0xff37C8F2))
+                      ? const Icon(Icons.check_circle, color: AppColors.brand)
                       : null,
                   onTap: () {
                     setState(() {
@@ -126,7 +127,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xffF5F9FC),
+      backgroundColor: AppColors.surface,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
@@ -152,7 +153,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     child: const Icon(
                       Icons.person_add_rounded,
                       size: 50,
-                      color: Color(0xff37C8F2),
+                      color: AppColors.brand,
                     ),
                   ),
                   const SizedBox(height: 25),
@@ -161,7 +162,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     style: TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xff222222)),
+                        color: AppColors.ink),
                   ),
                   const SizedBox(height: 10),
                   const Text(
@@ -248,9 +249,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : _onRegister,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xff37C8F2),
+                        backgroundColor: AppColors.brand,
                         disabledBackgroundColor:
-                            const Color(0xff37C8F2).withValues(alpha: 0.5),
+                            AppColors.brand.withValues(alpha: 0.5),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(18)),
                       ),
@@ -279,7 +280,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         onTap: () => Navigator.pop(context),
                         child: const Text("Iniciar Sesión",
                             style: TextStyle(
-                                color: Color(0xff37C8F2),
+                                color: AppColors.brand,
                                 fontWeight: FontWeight.bold)),
                       ),
                     ],
@@ -316,7 +317,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         validator: validator,
         style: const TextStyle(fontSize: 16),
         decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: const Color(0xff37C8F2)),
+          prefixIcon: Icon(icon, color: AppColors.brand),
           hintText: hint,
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 18),

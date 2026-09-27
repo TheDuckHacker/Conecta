@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:conecta_lsb/services/help_agent_service.dart';
 
 class _Bubble {
@@ -107,10 +108,10 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xffF4F8FA),
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        foregroundColor: const Color(0xff121B35),
+        foregroundColor: AppColors.ink,
         elevation: 0.5,
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -121,7 +122,7 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
             ),
             Text(
               'Señas, Academia y llamadas',
-              style: TextStyle(fontSize: 12, color: Color(0xff5A6E85)),
+              style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
             ),
           ],
         ),
@@ -138,9 +139,9 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
                 final align =
                     m.fromUser ? Alignment.centerRight : Alignment.centerLeft;
                 final bg =
-                    m.fromUser ? const Color(0xff27C7D9) : Colors.white;
+                    m.fromUser ? AppColors.brand : Colors.white;
                 final fg =
-                    m.fromUser ? Colors.white : const Color(0xff121B35);
+                    m.fromUser ? Colors.white : AppColors.ink;
                 return Align(
                   alignment: align,
                   child: Container(
@@ -184,7 +185,7 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
                 return ActionChip(
                   label: Text(s, style: const TextStyle(fontSize: 12)),
                   onPressed: _busy ? null : () => _send(s),
-                  backgroundColor: const Color(0xffE5F7FF),
+                  backgroundColor: AppColors.brandSoft,
                 );
               },
             ),
@@ -222,7 +223,7 @@ class _HelpAgentScreenState extends State<HelpAgentScreen> {
                   IconButton.filled(
                     onPressed: _busy ? null : () => _send(),
                     style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xff27C7D9),
+                      backgroundColor: AppColors.brand,
                       foregroundColor: Colors.white,
                     ),
                     icon: _busy

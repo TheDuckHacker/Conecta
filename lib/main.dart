@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:conecta_lsb/screens/login.dart';
 import 'package:conecta_lsb/screens/chat.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
@@ -35,7 +36,7 @@ class _SafeErrorTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const ColoredBox(
-      color: Color(0xff0F172A),
+      color: AppColors.callBg,
       child: Center(
         child: Padding(
           padding: EdgeInsets.all(12),
@@ -58,10 +59,11 @@ class ConectaApp extends StatelessWidget {
     return MaterialApp(
       title: 'Conecta LSB',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorSchemeSeed: const Color(0xff37C8F2),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      // Las pantallas aún tienen fondos claros fijos: modo oscuro listo en
+      // el tema, se activa con ThemeMode.system al terminar la migración.
+      themeMode: ThemeMode.light,
       home: const AuthWrapper(),
     );
   }
@@ -145,17 +147,17 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     if (_checking) {
       return const Scaffold(
-        backgroundColor: Color(0xffE8F4F8),
+        backgroundColor: AppColors.brandSoft,
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(color: Color(0xff37C8F2)),
+              CircularProgressIndicator(color: AppColors.brand),
               SizedBox(height: 16),
               Text(
                 'Cargando...',
                 style: TextStyle(
-                  color: Color(0xff1A3A4A),
+                  color: AppColors.ink,
                   fontWeight: FontWeight.w600,
                 ),
               ),

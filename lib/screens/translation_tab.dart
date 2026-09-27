@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/sign_ai_agent.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
@@ -249,7 +250,7 @@ class _TranslationTabState extends State<TranslationTab> {
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
-                color: Color(0xff121B35),
+                color: AppColors.ink,
               ),
             ),
             const SizedBox(height: 4),
@@ -279,10 +280,10 @@ class _TranslationTabState extends State<TranslationTab> {
                       height: 40,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: const Color(0xffE3F7FB),
+                        color: AppColors.brandSoft,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Icon(g.$3, color: const Color(0xff27C7D9)),
+                      child: Icon(g.$3, color: AppColors.brand),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -294,7 +295,7 @@ class _TranslationTabState extends State<TranslationTab> {
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 15,
-                              color: Color(0xff121B35),
+                              color: AppColors.ink,
                             ),
                           ),
                           Text(
@@ -387,7 +388,7 @@ class _TranslationTabState extends State<TranslationTab> {
                     CameraCoverPreview(controller: _camera!)
                   else
                     Container(
-                      color: const Color(0xff121B35),
+                      color: AppColors.ink,
                       child: Center(
                         child: _denied
                             ? const Padding(
@@ -399,7 +400,7 @@ class _TranslationTabState extends State<TranslationTab> {
                                 ),
                               )
                             : const CircularProgressIndicator(
-                                color: Color(0xff27C7D9),
+                                color: AppColors.brand,
                               ),
                       ),
                     ),
@@ -416,7 +417,7 @@ class _TranslationTabState extends State<TranslationTab> {
                           horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                         color: _handsVisible
-                            ? const Color(0xff2ECC71).withValues(alpha: 0.9)
+                            ? AppColors.success.withValues(alpha: 0.9)
                             : Colors.red.withValues(alpha: 0.85),
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -469,7 +470,7 @@ class _TranslationTabState extends State<TranslationTab> {
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.82),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xff27C7D9)),
+                        border: Border.all(color: AppColors.brand),
                       ),
                       child: Column(
                         children: [
@@ -478,7 +479,7 @@ class _TranslationTabState extends State<TranslationTab> {
                                 ? 'FRASE DEL AGENTE IA'
                                 : 'FRASE · ${_agentSource == 'openai' ? 'GPT' : 'AGENTE'}',
                             style: const TextStyle(
-                              color: Color(0xff27C7D9),
+                              color: AppColors.brand,
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.8,
@@ -537,13 +538,13 @@ class _TranslationTabState extends State<TranslationTab> {
               Row(
                 children: [
                   const Icon(Icons.auto_awesome,
-                      color: Color(0xff27C7D9), size: 18),
+                      color: AppColors.brand, size: 18),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
                       'PALABRAS → FRASE',
                       style: TextStyle(
-                        color: Color(0xffA8B8C0),
+                        color: AppColors.inkMuted,
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 0.8,
@@ -554,7 +555,7 @@ class _TranslationTabState extends State<TranslationTab> {
                     _agentSource == 'gemini' ? 'IA' : 'Local',
                     style: TextStyle(
                       color: _agentSource == 'gemini'
-                          ? const Color(0xff2ECC71)
+                          ? AppColors.success
                           : Colors.orange,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
@@ -566,7 +567,7 @@ class _TranslationTabState extends State<TranslationTab> {
               Text(
                 _sentence.isNotEmpty ? _sentence : _hint,
                 style: const TextStyle(
-                  color: Color(0xff121B35),
+                  color: AppColors.ink,
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                 ),
@@ -576,7 +577,7 @@ class _TranslationTabState extends State<TranslationTab> {
                 Text(
                   'Señas: $_signsLine',
                   style: const TextStyle(
-                    color: Color(0xff6B7C86),
+                    color: AppColors.inkMuted,
                     fontSize: 13,
                   ),
                 ),
@@ -595,7 +596,7 @@ class _TranslationTabState extends State<TranslationTab> {
                       icon: const Icon(Icons.volume_up_rounded),
                       label: const Text('Escuchar'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xff27C7D9),
+                        backgroundColor: AppColors.brand,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -607,8 +608,8 @@ class _TranslationTabState extends State<TranslationTab> {
                   OutlinedButton(
                     onPressed: _clear,
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xff27C7D9),
-                      side: const BorderSide(color: Color(0xff27C7D9)),
+                      foregroundColor: AppColors.brand,
+                      side: const BorderSide(color: AppColors.brand),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),

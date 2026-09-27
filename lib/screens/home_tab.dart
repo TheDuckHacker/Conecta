@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:appwrite/models.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/chat_service.dart';
@@ -79,7 +80,7 @@ class _HomeTabState extends State<HomeTab> {
                   style: const TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xff121B35),
+                    color: AppColors.ink,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -87,7 +88,7 @@ class _HomeTabState extends State<HomeTab> {
                   "¿Qué quieres comunicar hoy?",
                   style: TextStyle(
                     fontSize: 16,
-                    color: Color(0xff5A6E85),
+                    color: AppColors.inkMuted,
                   ),
                 ),
                 const SizedBox(height: 25),
@@ -146,10 +147,10 @@ class _HomeTabState extends State<HomeTab> {
                 height: 60,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(18),
-                  color: const Color(0xff27C7D9),
+                  color: AppColors.brand,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xff27C7D9).withValues(alpha: 0.25),
+                      color: AppColors.brand.withValues(alpha: 0.25),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -171,7 +172,7 @@ class _HomeTabState extends State<HomeTab> {
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xff121B35),
+                        color: AppColors.ink,
                       ),
                     ),
                     SizedBox(height: 4),
@@ -179,7 +180,7 @@ class _HomeTabState extends State<HomeTab> {
                       "Convierte LSB a texto al instante",
                       style: TextStyle(
                         fontSize: 14,
-                        color: Color(0xff5A6E85),
+                        color: AppColors.inkMuted,
                       ),
                     ),
                   ],
@@ -194,10 +195,10 @@ class _HomeTabState extends State<HomeTab> {
             child: ElevatedButton(
               onPressed: widget.onStartCamera,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xff27C7D9),
+                backgroundColor: AppColors.brand,
                 foregroundColor: Colors.white,
                 elevation: 4,
-                shadowColor: const Color(0xff27C7D9).withValues(alpha: 0.25),
+                shadowColor: AppColors.brand.withValues(alpha: 0.25),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
@@ -226,7 +227,7 @@ class _HomeTabState extends State<HomeTab> {
             fontSize: 13,
             fontWeight: FontWeight.bold,
             letterSpacing: 1.2,
-            color: Color(0xff5A6E85),
+            color: AppColors.inkMuted,
           ),
         ),
         GestureDetector(
@@ -242,7 +243,7 @@ class _HomeTabState extends State<HomeTab> {
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: Color(0xff27C7D9),
+              color: AppColors.brand,
             ),
           ),
         ),
@@ -255,7 +256,7 @@ class _HomeTabState extends State<HomeTab> {
       return const SizedBox(
         height: 60,
         child: Center(
-            child: CircularProgressIndicator(color: Color(0xff27C7D9))),
+            child: CircularProgressIndicator(color: AppColors.brand)),
       );
     }
 
@@ -270,12 +271,12 @@ class _HomeTabState extends State<HomeTab> {
         child: Row(
           children: [
             const Icon(Icons.person_add_rounded,
-                color: Color(0xff27C7D9), size: 24),
+                color: AppColors.brand, size: 24),
             const SizedBox(width: 12),
             const Expanded(
               child: Text(
                 "No tienes contactos agregados aún.",
-                style: TextStyle(color: Color(0xff5A6E85), fontSize: 13),
+                style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
               ),
             ),
             TextButton(
@@ -288,7 +289,7 @@ class _HomeTabState extends State<HomeTab> {
               },
               child: const Text("Agregar",
                   style: TextStyle(
-                      color: Color(0xff27C7D9), fontWeight: FontWeight.bold)),
+                      color: AppColors.brand, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -321,7 +322,7 @@ class _HomeTabState extends State<HomeTab> {
                   children: [
                     CircleAvatar(
                       radius: 26,
-                      backgroundColor: const Color(0xffCDEFF7),
+                      backgroundColor: AppColors.brandSoft,
                       backgroundImage:
                           avatar.isNotEmpty ? NetworkImage(avatar) : null,
                       onBackgroundImageError:
@@ -330,7 +331,7 @@ class _HomeTabState extends State<HomeTab> {
                           ? Text(
                               name.isNotEmpty ? name[0].toUpperCase() : '?',
                               style: const TextStyle(
-                                color: Color(0xff27C7D9),
+                                color: AppColors.brand,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 18,
                               ),
@@ -345,7 +346,7 @@ class _HomeTabState extends State<HomeTab> {
                           width: 12,
                           height: 12,
                           decoration: BoxDecoration(
-                            color: const Color(0xff2ECC71),
+                            color: AppColors.success,
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 2),
                           ),
@@ -362,7 +363,7 @@ class _HomeTabState extends State<HomeTab> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: Color(0xff121B35),
+                      color: AppColors.ink,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
@@ -383,7 +384,7 @@ class _HomeTabState extends State<HomeTab> {
         fontSize: 13,
         fontWeight: FontWeight.bold,
         letterSpacing: 1.2,
-        color: Color(0xff5A6E85),
+        color: AppColors.inkMuted,
       ),
     );
   }
@@ -393,7 +394,7 @@ class _HomeTabState extends State<HomeTab> {
       return const SizedBox(
         height: 60,
         child: Center(
-            child: CircularProgressIndicator(color: Color(0xff27C7D9))),
+            child: CircularProgressIndicator(color: AppColors.brand)),
       );
     }
 
@@ -408,12 +409,12 @@ class _HomeTabState extends State<HomeTab> {
         child: const Column(
           children: [
             Icon(Icons.chat_bubble_outline_rounded,
-                color: Color(0xff5A6E85), size: 32),
+                color: AppColors.inkMuted, size: 32),
             SizedBox(height: 8),
             Text(
               "Sin conversaciones recientes",
               style: TextStyle(
-                color: Color(0xff121B35),
+                color: AppColors.ink,
                 fontSize: 15,
                 fontWeight: FontWeight.bold,
               ),
@@ -421,7 +422,7 @@ class _HomeTabState extends State<HomeTab> {
             SizedBox(height: 4),
             Text(
               "Agrega un contacto para iniciar un chat.",
-              style: TextStyle(color: Color(0xff5A6E85), fontSize: 13),
+              style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
             ),
           ],
         ),
@@ -489,7 +490,7 @@ class _HomeTabState extends State<HomeTab> {
                   children: [
                     CircleAvatar(
                       radius: 24,
-                      backgroundColor: const Color(0xffCDEFF7),
+                      backgroundColor: AppColors.brandSoft,
                       backgroundImage:
                           avatar.isNotEmpty ? NetworkImage(avatar) : null,
                       onBackgroundImageError:
@@ -498,7 +499,7 @@ class _HomeTabState extends State<HomeTab> {
                           ? Text(
                               name.isNotEmpty ? name[0].toUpperCase() : '?',
                               style: const TextStyle(
-                                  color: Color(0xff121B35),
+                                  color: AppColors.ink,
                                   fontWeight: FontWeight.bold),
                             )
                           : null,
@@ -511,7 +512,7 @@ class _HomeTabState extends State<HomeTab> {
                           Text(
                             name,
                             style: const TextStyle(
-                              color: Color(0xff121B35),
+                              color: AppColors.ink,
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
                             ),
@@ -524,7 +525,7 @@ class _HomeTabState extends State<HomeTab> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              color: Color(0xff5A6E85),
+                              color: AppColors.inkMuted,
                               fontSize: 14,
                             ),
                           ),
@@ -536,7 +537,7 @@ class _HomeTabState extends State<HomeTab> {
                       Text(
                         _formatTime(updatedAt),
                         style: const TextStyle(
-                          color: Color(0xffA8B8C0),
+                          color: AppColors.inkMuted,
                           fontSize: 12,
                         ),
                       ),

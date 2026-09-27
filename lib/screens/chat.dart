@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:conecta_lsb/screens/academy_tab.dart';
@@ -12,6 +12,7 @@ import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/avatar_service.dart';
 import 'package:conecta_lsb/services/call_invite_service.dart';
 import 'package:conecta_lsb/services/notification_service.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -91,50 +92,46 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xff27C7D9),
-        elevation: 0,
         titleSpacing: 20,
         title: Row(
           children: [
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                ).then((_) {
-                  _loadAvatar();
-                  _pageCache.remove(4);
-                });
-              },
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.3),
-                    width: 1.5,
+            Semantics(
+              button: true,
+              label: 'Mi perfil',
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                  ).then((_) {
+                    _loadAvatar();
+                    _pageCache.remove(4);
+                  });
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.3),
+                      width: 1.5,
+                    ),
                   ),
-                ),
-                child: CircleAvatar(
-                  radius: 18,
-                  backgroundColor: Colors.white24,
-                  backgroundImage: img,
-                  onBackgroundImageError: img != null ? (_, __) {} : null,
-                  child: img == null
-                      ? const Icon(Icons.person, color: Colors.white, size: 18)
-                      : null,
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: Colors.white24,
+                    backgroundImage: img,
+                    onBackgroundImageError: img != null ? (_, __) {} : null,
+                    child: img == null
+                        ? const Icon(Icons.person,
+                            color: Colors.white, size: 18)
+                        : null,
+                  ),
                 ),
               ),
             ),
             const SizedBox(width: 12),
-            const Text(
-              'Conecta',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-                color: Colors.white,
-                letterSpacing: 0.5,
-              ),
-            ),
+            const Text('Conecta'),
           ],
         ),
         actions: [
@@ -153,6 +150,8 @@ class _ChatScreenState extends State<ChatScreen> {
             },
           ),
           IconButton(
+            tooltip:
+                _pendingCall != null ? 'Llamada entrante' : 'Notificaciones',
             icon: Badge(
               isLabelVisible: _pendingCall != null,
               child: const Icon(
@@ -169,10 +168,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     content: Text(
                       'Llamada de ${call.fromName} — acepta en la pantalla',
                     ),
-                    backgroundColor: const Color(0xff27C7D9),
                     action: SnackBarAction(
-                      label: 'OK',
-                      textColor: Colors.white,
+                      label: 'Entendido',
+                      textColor: AppColors.brandBright,
                       onPressed: () {},
                     ),
                   ),
@@ -186,8 +184,7 @@ class _ChatScreenState extends State<ChatScreen> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('No tienes nuevas notificaciones'),
-                    backgroundColor: Color(0xff27C7D9),
+                    content: Text('No tienes notificaciones nuevas'),
                   ),
                 );
               }
@@ -196,88 +193,48 @@ class _ChatScreenState extends State<ChatScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color(0xffE5F7FF),
-              Color(0xffCDEFF7),
-              Color(0xffA9E0F3),
-            ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: _pageFor(_currentIndex),
-      ),
-      bottomNavigationBar: _buildCustomBottomNavigationBar(),
+      body: _pageFor(_currentIndex),
+      bottomNavigationBar: _buildNavigationBar(),
     );
   }
 
-  Widget _buildCustomBottomNavigationBar() {
-    return Container(
-      height: 75,
-      decoration: BoxDecoration(
-        color: const Color(0xff27C7D9),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(30),
-          topRight: Radius.circular(30),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 15,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _nav(Icons.home_rounded, 0),
-          _nav(Icons.chat_bubble_rounded, 1),
-          GestureDetector(
-            onTap: () => setState(() => _currentIndex = 2),
-            child: Container(
-              width: 58,
-              height: 58,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.videocam_rounded,
-                color: Color(0xff27C7D9),
-                size: 28,
-              ),
-            ),
-          ),
-          _nav(Icons.school_rounded, 3),
-          _nav(Icons.settings_rounded, 4),
-        ],
-      ),
-    );
-  }
-
-  Widget _nav(IconData icon, int index) {
-    final selected = _currentIndex == index;
-    return IconButton(
-      icon: Icon(
-        icon,
-        color: selected ? Colors.white : Colors.white.withValues(alpha: 0.5),
-        size: 26,
-      ),
-      onPressed: () {
+  /// Barra con ícono + texto siempre visible: ningún botón solo con ícono
+  /// (docs/flutter-design.md §8). Traducir va al centro por ser la acción
+  /// principal de la app.
+  Widget _buildNavigationBar() {
+    return NavigationBar(
+      selectedIndex: _currentIndex,
+      onDestinationSelected: (index) {
         setState(() => _currentIndex = index);
         if (index == 4) _loadAvatar();
       },
+      destinations: const [
+        NavigationDestination(
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home_rounded),
+          label: 'Inicio',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.chat_bubble_outline_rounded),
+          selectedIcon: Icon(Icons.chat_bubble_rounded),
+          label: 'Chats',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.sign_language_outlined),
+          selectedIcon: Icon(Icons.sign_language_rounded),
+          label: 'Traducir',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.school_outlined),
+          selectedIcon: Icon(Icons.school_rounded),
+          label: 'Academia',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.settings_outlined),
+          selectedIcon: Icon(Icons.settings_rounded),
+          label: 'Ajustes',
+        ),
+      ],
     );
   }
 }

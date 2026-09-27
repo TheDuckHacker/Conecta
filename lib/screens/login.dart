@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:conecta_lsb/screens/chat.dart';
 import 'package:conecta_lsb/screens/register.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
@@ -71,7 +72,7 @@ class _LoginState extends State<Login> {
                             isSelected ? FontWeight.bold : FontWeight.normal),
                   ),
                   trailing: isSelected
-                      ? const Icon(Icons.check_circle, color: Color(0xff37C8F2))
+                      ? const Icon(Icons.check_circle, color: AppColors.brand)
                       : null,
                   onTap: () {
                     setState(() {
@@ -122,7 +123,7 @@ class _LoginState extends State<Login> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xffF5F9FC),
+      backgroundColor: AppColors.surface,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
@@ -149,7 +150,7 @@ class _LoginState extends State<Login> {
                     child: const Icon(
                       Icons.chat_bubble_rounded,
                       size: 55,
-                      color: Color(0xff37C8F2),
+                      color: AppColors.brand,
                     ),
                   ),
                   const SizedBox(height: 25),
@@ -157,14 +158,14 @@ class _LoginState extends State<Login> {
                       style: TextStyle(
                           fontSize: 30,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xff222222))),
+                          color: AppColors.ink)),
                   const SizedBox(height: 10),
                   const Text(
                     "Bienvenido",
                     style: TextStyle(
                         fontSize: 38,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xff222222)),
+                        color: AppColors.ink),
                   ),
                   const SizedBox(height: 10),
                   const Text(
@@ -242,9 +243,9 @@ class _LoginState extends State<Login> {
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : _onLogin,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xff37C8F2),
+                        backgroundColor: AppColors.brand,
                         disabledBackgroundColor:
-                            const Color(0xff37C8F2).withValues(alpha: 0.5),
+                            AppColors.brand.withValues(alpha: 0.5),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(18)),
                       ),
@@ -276,7 +277,7 @@ class _LoginState extends State<Login> {
                                 builder: (_) => const RegisterScreen())),
                         child: const Text("Regístrate",
                             style: TextStyle(
-                                color: Color(0xff37C8F2),
+                                color: AppColors.brand,
                                 fontWeight: FontWeight.bold)),
                       ),
                     ],

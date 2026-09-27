@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:appwrite/models.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/contact_service.dart';
@@ -76,7 +77,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
                             isSelected ? FontWeight.bold : FontWeight.normal),
                   ),
                   trailing: isSelected
-                      ? const Icon(Icons.check_circle, color: Color(0xff37C8F2))
+                      ? const Icon(Icons.check_circle, color: AppColors.brand)
                       : null,
                   onTap: () {
                     setState(() {
@@ -160,7 +161,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Contacto agregado exitosamente'),
-            backgroundColor: Color(0xff37C8F2),
+            backgroundColor: AppColors.brand,
           ),
         );
         Navigator.pop(context, true);
@@ -222,10 +223,10 @@ class _AddContactScreenState extends State<AddContactScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const accent = Color(0xff37C8F2);
+    const accent = AppColors.brand;
 
     return Scaffold(
-      backgroundColor: const Color(0xffF5F9FC),
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
         title: const Text('Agregar Contacto',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -243,12 +244,12 @@ class _AddContactScreenState extends State<AddContactScreen> {
               style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xff1A3A4A)),
+                  color: AppColors.ink),
             ),
             const SizedBox(height: 6),
             const Text(
               "Ingresa el número de tu contacto para encontrarlo en Conecta.",
-              style: TextStyle(fontSize: 14, color: Color(0xff6B9BB0)),
+              style: TextStyle(fontSize: 14, color: AppColors.inkMuted),
             ),
             const SizedBox(height: 24),
             Container(
@@ -346,7 +347,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
                       children: [
                         CircleAvatar(
                           radius: 28,
-                          backgroundColor: const Color(0xffCDEFF7),
+                          backgroundColor: AppColors.brandSoft,
                           backgroundImage:
                               (_foundUser!.data['avatar'] ?? '').isNotEmpty
                                   ? NetworkImage(_foundUser!.data['avatar'])
@@ -373,14 +374,14 @@ class _AddContactScreenState extends State<AddContactScreen> {
                                 style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xff1A3A4A),
+                                  color: AppColors.ink,
                                 ),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 _foundUser!.data['phone'] ?? '',
                                 style: const TextStyle(
-                                    color: Color(0xff6B9BB0), fontSize: 14),
+                                    color: AppColors.inkMuted, fontSize: 14),
                               ),
                             ],
                           ),

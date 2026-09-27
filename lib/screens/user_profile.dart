@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/screens/chat_detail.dart';
 
@@ -44,21 +45,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     final status = _profile?['status'] ?? 'offline';
 
     return Scaffold(
-      backgroundColor: const Color(0xffF5F9FC),
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xff121B35)),
+          icon: const Icon(Icons.arrow_back_rounded, color: AppColors.ink),
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           "Perfil",
-          style: TextStyle(color: Color(0xff121B35), fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppColors.ink, fontWeight: FontWeight.bold),
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xff37C8F2)))
+          ? const Center(child: CircularProgressIndicator(color: AppColors.brand))
           : _profile == null
               ? const Center(child: Text("Usuario no encontrado", style: TextStyle(color: Colors.grey)))
               : SingleChildScrollView(
@@ -72,7 +73,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         children: [
                           CircleAvatar(
                             radius: 65,
-                            backgroundColor: const Color(0xffCDEFF7),
+                            backgroundColor: AppColors.brandSoft,
                             backgroundImage: avatar.isNotEmpty ? NetworkImage(avatar) : null,
                             onBackgroundImageError: avatar.isNotEmpty ? (_, __) {} : null,
                             child: avatar.isEmpty
@@ -81,7 +82,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                     style: const TextStyle(
                                       fontSize: 50,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xff121B35),
+                                      color: AppColors.ink,
                                     ),
                                   )
                                 : null,
@@ -93,7 +94,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               width: 20,
                               height: 20,
                               decoration: BoxDecoration(
-                                color: status == 'online' ? const Color(0xff2ECC71) : Colors.grey,
+                                color: status == 'online' ? AppColors.success : Colors.grey,
                                 shape: BoxShape.circle,
                                 border: Border.all(color: Colors.white, width: 3),
                               ),
@@ -108,7 +109,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         style: const TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xff121B35),
+                          color: AppColors.ink,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -117,14 +118,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                         decoration: BoxDecoration(
                           color: status == 'online'
-                              ? const Color(0xff2ECC71).withValues(alpha: 0.1)
+                              ? AppColors.success.withValues(alpha: 0.1)
                               : Colors.grey.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
                           status == 'online' ? 'En línea' : 'Último visto reciente',
                           style: TextStyle(
-                            color: status == 'online' ? const Color(0xff2ECC71) : Colors.grey,
+                            color: status == 'online' ? AppColors.success : Colors.grey,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -165,7 +166,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                             style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
                           ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xff37C8F2),
+                            backgroundColor: AppColors.brand,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                           ),
                         ),
@@ -192,19 +193,19 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: const Color(0xff37C8F2).withValues(alpha: 0.1),
+              color: AppColors.brand.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, color: const Color(0xff37C8F2)),
+            child: Icon(icon, color: AppColors.brand),
           ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(color: Color(0xffA8B8C0), fontSize: 13)),
+                Text(title, style: const TextStyle(color: AppColors.inkMuted, fontSize: 13)),
                 const SizedBox(height: 2),
-                Text(value, style: const TextStyle(color: Color(0xff121B35), fontSize: 16, fontWeight: FontWeight.w500)),
+                Text(value, style: const TextStyle(color: AppColors.ink, fontSize: 16, fontWeight: FontWeight.w500)),
               ],
             ),
           ),

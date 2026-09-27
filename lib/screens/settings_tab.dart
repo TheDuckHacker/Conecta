@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:conecta_lsb/screens/login.dart';
 import 'package:conecta_lsb/screens/profile.dart';
 import 'package:conecta_lsb/screens/help_agent_screen.dart';
@@ -86,7 +87,7 @@ class _SettingsTabState extends State<SettingsTab> {
                 (e) => ListTile(
                   title: Text(e.key),
                   trailing: _settings.voiceRate == e.value
-                      ? const Icon(Icons.check, color: Color(0xff37C8F2))
+                      ? const Icon(Icons.check, color: AppColors.brand)
                       : null,
                   onTap: () => Navigator.pop(ctx, e.value),
                 ),
@@ -121,7 +122,7 @@ class _SettingsTabState extends State<SettingsTab> {
   Widget build(BuildContext context) {
     if (!_loaded) {
       return const Center(
-        child: CircularProgressIndicator(color: Color(0xff37C8F2)),
+        child: CircularProgressIndicator(color: AppColors.brand),
       );
     }
 
@@ -143,7 +144,7 @@ class _SettingsTabState extends State<SettingsTab> {
               children: [
                 CircleAvatar(
                   radius: 36,
-                  backgroundColor: const Color(0xffCDEFF7),
+                  backgroundColor: AppColors.brandSoft,
                   backgroundImage: img,
                   onBackgroundImageError: img != null ? (_, __) {} : null,
                   child: img == null
@@ -154,7 +155,7 @@ class _SettingsTabState extends State<SettingsTab> {
                           style: const TextStyle(
                             fontSize: 30,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xff121B35),
+                            color: AppColors.ink,
                           ),
                         )
                       : null,
@@ -169,14 +170,14 @@ class _SettingsTabState extends State<SettingsTab> {
                         style: const TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xff121B35),
+                          color: AppColors.ink,
                         ),
                       ),
                       Text(
                         online ? 'En línea' : 'Desconectado',
                         style: TextStyle(
                           color: online
-                              ? const Color(0xff2ECC71)
+                              ? AppColors.success
                               : Colors.grey,
                           fontWeight: FontWeight.w600,
                         ),
@@ -219,7 +220,7 @@ class _SettingsTabState extends State<SettingsTab> {
             title: 'Subtítulos automáticos',
             trailing: Switch(
               value: _settings.autoCaptions,
-              activeThumbColor: const Color(0xff37C8F2),
+              activeThumbColor: AppColors.brand,
               onChanged: (v) async {
                 await _settings.setAutoCaptions(v);
                 setState(() {});
@@ -254,7 +255,7 @@ class _SettingsTabState extends State<SettingsTab> {
             subtitle: 'Se aplica al reiniciar sesión',
             trailing: Switch(
               value: _settings.darkMode,
-              activeThumbColor: const Color(0xff37C8F2),
+              activeThumbColor: AppColors.brand,
               onChanged: (v) async {
                 await _settings.setDarkMode(v);
                 setState(() {});
@@ -308,7 +309,7 @@ class _SettingsTabState extends State<SettingsTab> {
         child: Text(
           t,
           style: const TextStyle(
-            color: Color(0xffA8B8C0),
+            color: AppColors.inkMuted,
             fontWeight: FontWeight.bold,
             fontSize: 12,
             letterSpacing: 0.8,
@@ -326,8 +327,8 @@ class _SettingsTabState extends State<SettingsTab> {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: CircleAvatar(
-        backgroundColor: const Color(0xffE5F7FF),
-        child: Icon(icon, color: const Color(0xff27C7D9)),
+        backgroundColor: AppColors.brandSoft,
+        child: Icon(icon, color: AppColors.brand),
       ),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: subtitle != null ? Text(subtitle) : null,

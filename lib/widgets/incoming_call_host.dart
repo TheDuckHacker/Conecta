@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/call_invite_service.dart';
 import 'package:conecta_lsb/services/call_ringtone_service.dart';
@@ -187,16 +188,16 @@ class _IncomingCallHostState extends State<IncomingCallHost>
             margin: const EdgeInsets.symmetric(horizontal: 28),
             padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
             decoration: BoxDecoration(
-              color: const Color(0xff0F172A),
+              color: AppColors.callBg,
               borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: const Color(0xff37C8F2), width: 1.5),
+              border: Border.all(color: AppColors.brandBright, width: 1.5),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(
                   Icons.videocam_rounded,
-                  color: Color(0xff37C8F2),
+                  color: AppColors.brandBright,
                   size: 52,
                 ),
                 const SizedBox(height: 12),
@@ -242,7 +243,7 @@ class _IncomingCallHostState extends State<IncomingCallHost>
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff2ECC71),
+                          backgroundColor: AppColors.successBright,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(

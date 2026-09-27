@@ -31,6 +31,7 @@ dependencies:
   flutter_webrtc: ^1.5.2
   hand_landmarker: ^3.1.0
   camera_platform_interface: ^2.14.0
+  flutter_svg: ^2.3.0
 
 dependency_overrides:
   flutter_web_auth_2: ^5.0.0
@@ -48,4 +49,13 @@ flutter:
     - assets/msl/vocabulary.json
     - assets/msl/guia_senas.png
     - assets/sounds/ringtone.wav
+    - assets/illustrations/
+
+  # Atkinson Hyperlegible (Braille Institute, OFL): máxima legibilidad.
+  fonts:
+    - family: AtkinsonHyperlegible
+      fonts:
+        - asset: assets/fonts/AtkinsonHyperlegible-Regular.ttf
+        - asset: assets/fonts/AtkinsonHyperlegible-Bold.ttf
+          weight: 700
 

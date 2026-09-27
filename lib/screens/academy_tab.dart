@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/settings_service.dart';
 import 'package:conecta_lsb/services/sign_detection_service.dart';
@@ -116,7 +117,7 @@ class _AcademyTabState extends State<AcademyTab> {
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
-                color: Color(0xff121B35),
+                color: AppColors.ink,
               ),
             ),
             const SizedBox(height: 8),
@@ -127,7 +128,7 @@ class _AcademyTabState extends State<AcademyTab> {
               '4) Continúa con la siguiente seña.',
               style: TextStyle(
                 fontSize: 14,
-                color: Color(0xff5A6E85),
+                color: AppColors.inkMuted,
                 height: 1.45,
               ),
             ),
@@ -145,7 +146,7 @@ class _AcademyTabState extends State<AcademyTab> {
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
-                color: Color(0xff121B35),
+                color: AppColors.ink,
               ),
             ),
             const SizedBox(height: 8),
@@ -156,7 +157,7 @@ class _AcademyTabState extends State<AcademyTab> {
               '• Si no detecta, mira los pasos otra vez y repite más lento.',
               style: TextStyle(
                 fontSize: 14,
-                color: Color(0xff5A6E85),
+                color: AppColors.inkMuted,
                 height: 1.45,
               ),
             ),
@@ -182,7 +183,7 @@ class _AcademyTabState extends State<AcademyTab> {
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xff121B35),
+                      color: AppColors.ink,
                     ),
                   ),
                 ),
@@ -190,7 +191,7 @@ class _AcademyTabState extends State<AcademyTab> {
                   onPressed: _openFullGuide,
                   tooltip: 'Cómo empezar',
                   icon: const Icon(Icons.menu_book_rounded,
-                      color: Color(0xff27C7D9)),
+                      color: AppColors.brand),
                 ),
               ],
             ),
@@ -198,11 +199,11 @@ class _AcademyTabState extends State<AcademyTab> {
             const Text(
               'Aquí aprendes qué seña hacer y cómo mover las manos. '
               'Toca “Cómo empezar” o elige un curso.',
-              style: TextStyle(fontSize: 15, color: Color(0xff5A6E85)),
+              style: TextStyle(fontSize: 15, color: AppColors.inkMuted),
             ),
             const SizedBox(height: 14),
             Material(
-              color: const Color(0xffE5F7FF),
+              color: AppColors.brandSoft,
               borderRadius: BorderRadius.circular(16),
               child: InkWell(
                 borderRadius: BorderRadius.circular(16),
@@ -211,7 +212,7 @@ class _AcademyTabState extends State<AcademyTab> {
                   padding: EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      Icon(Icons.school_rounded, color: Color(0xff27C7D9)),
+                      Icon(Icons.school_rounded, color: AppColors.brand),
                       SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -221,7 +222,7 @@ class _AcademyTabState extends State<AcademyTab> {
                               'Cómo empezar (guía con imágenes)',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xff121B35),
+                                color: AppColors.ink,
                               ),
                             ),
                             SizedBox(height: 2),
@@ -229,14 +230,14 @@ class _AcademyTabState extends State<AcademyTab> {
                               'Pasos + ilustraciones de Hola, Cómo estás, Yo…',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Color(0xff5A6E85),
+                                color: AppColors.inkMuted,
                               ),
                             ),
                           ],
                         ),
                       ),
                       Icon(Icons.chevron_right_rounded,
-                          color: Color(0xff27C7D9)),
+                          color: AppColors.brand),
                     ],
                   ),
                 ),
@@ -278,11 +279,11 @@ class _AcademyTabState extends State<AcademyTab> {
                                   width: 50,
                                   height: 50,
                                   decoration: BoxDecoration(
-                                    color: const Color(0xffE5F7FF),
+                                    color: AppColors.brandSoft,
                                     borderRadius: BorderRadius.circular(14),
                                   ),
                                   child: Icon(course.icon,
-                                      color: const Color(0xff27C7D9), size: 26),
+                                      color: AppColors.brand, size: 26),
                                 ),
                                 const SizedBox(width: 16),
                                 Expanded(
@@ -293,7 +294,7 @@ class _AcademyTabState extends State<AcademyTab> {
                                       Text(
                                         course.level,
                                         style: const TextStyle(
-                                          color: Color(0xff27C7D9),
+                                          color: AppColors.brand,
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -302,7 +303,7 @@ class _AcademyTabState extends State<AcademyTab> {
                                       Text(
                                         course.title,
                                         style: const TextStyle(
-                                          color: Color(0xff121B35),
+                                          color: AppColors.ink,
                                           fontSize: 16,
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -311,14 +312,14 @@ class _AcademyTabState extends State<AcademyTab> {
                                   ),
                                 ),
                                 const Icon(Icons.play_circle_fill_rounded,
-                                    color: Color(0xff27C7D9), size: 32),
+                                    color: AppColors.brand, size: 32),
                               ],
                             ),
                             const SizedBox(height: 12),
                             Text(
                               course.desc,
                               style: const TextStyle(
-                                color: Color(0xff5A6E85),
+                                color: AppColors.inkMuted,
                                 fontSize: 13,
                               ),
                             ),
@@ -335,7 +336,7 @@ class _AcademyTabState extends State<AcademyTab> {
                                           : p),
                                       labelStyle: const TextStyle(fontSize: 11),
                                       backgroundColor:
-                                          const Color(0xffF0F7FA),
+                                          AppColors.surface,
                                     ),
                                   )
                                   .toList(),
@@ -352,7 +353,7 @@ class _AcademyTabState extends State<AcademyTab> {
                                       backgroundColor: Colors.grey.shade100,
                                       valueColor:
                                           const AlwaysStoppedAnimation(
-                                              Color(0xff27C7D9)),
+                                              AppColors.brand),
                                     ),
                                   ),
                                 ),
@@ -361,7 +362,7 @@ class _AcademyTabState extends State<AcademyTab> {
                                   '${(progress * 100).toInt()}%',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
-                                    color: Color(0xff121B35),
+                                    color: AppColors.ink,
                                   ),
                                 ),
                               ],
@@ -372,7 +373,7 @@ class _AcademyTabState extends State<AcademyTab> {
                                   ? 'Completado · Toca para repetir'
                                   : 'Toca para ver pasos y practicar',
                               style: const TextStyle(
-                                color: Color(0xff27C7D9),
+                                color: AppColors.brand,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -551,9 +552,9 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
   Widget build(BuildContext context) {
     final progress = _done.length / widget.course.practices.length;
     return Scaffold(
-      backgroundColor: const Color(0xff0F172A),
+      backgroundColor: AppColors.callBg,
       appBar: AppBar(
-        backgroundColor: const Color(0xff0F172A),
+        backgroundColor: AppColors.callBg,
         foregroundColor: Colors.white,
         title: Text(widget.course.title),
         actions: [
@@ -578,14 +579,14 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
               LinearProgressIndicator(
                 value: progress,
                 backgroundColor: Colors.white12,
-                color: const Color(0xff37C8F2),
+                color: AppColors.brand,
               ),
               const SizedBox(height: 18),
               const Text(
                 'APRENDE LA SEÑA',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Color(0xff37C8F2),
+                  color: AppColors.brand,
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1,
@@ -596,7 +597,7 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(signIcon(_target),
-                      color: const Color(0xff37C8F2), size: 36),
+                      color: AppColors.brand, size: 36),
                   const SizedBox(width: 12),
                   Flexible(
                     child: Text(
@@ -644,7 +645,7 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
                       color: Colors.white.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: const Color(0xff37C8F2).withValues(alpha: 0.35),
+                        color: AppColors.brand.withValues(alpha: 0.35),
                       ),
                     ),
                     child: Row(
@@ -652,7 +653,7 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
                       children: [
                         CircleAvatar(
                           radius: 14,
-                          backgroundColor: const Color(0xff37C8F2),
+                          backgroundColor: AppColors.brand,
                           child: Text(
                             '${i + 1}',
                             style: const TextStyle(
@@ -697,7 +698,7 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
               child: ElevatedButton.icon(
                 onPressed: _startCamera,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff37C8F2),
+                  backgroundColor: AppColors.brand,
                   foregroundColor: Colors.black,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
@@ -725,13 +726,13 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
             children: [
               Row(
                 children: [
-                  Icon(signIcon(_target), color: const Color(0xff37C8F2)),
+                  Icon(signIcon(_target), color: AppColors.brand),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Practica: $_targetLabel',
                       style: const TextStyle(
-                        color: Color(0xff37C8F2),
+                        color: AppColors.brand,
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
@@ -744,7 +745,7 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
                     }),
                     child: const Text(
                       'Ver pasos',
-                      style: TextStyle(color: Color(0xff37C8F2)),
+                      style: TextStyle(color: AppColors.brand),
                     ),
                   ),
                 ],
@@ -776,7 +777,7 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
               LinearProgressIndicator(
                 value: progress,
                 backgroundColor: Colors.white12,
-                color: const Color(0xff37C8F2),
+                color: AppColors.brand,
               ),
             ],
           ),
@@ -796,7 +797,7 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
                     )
                   : const Center(
                       child: CircularProgressIndicator(
-                          color: Color(0xff37C8F2)),
+                          color: AppColors.brand),
                     ),
             ),
           ),
@@ -818,9 +819,9 @@ class _AcademyPracticeScreenState extends State<AcademyPracticeScreen> {
                 ),
                 label: Text(label),
                 backgroundColor: ok
-                    ? const Color(0xff2ECC71)
+                    ? AppColors.success
                     : (current
-                        ? const Color(0xff37C8F2)
+                        ? AppColors.brand
                         : Colors.white12),
                 labelStyle: TextStyle(
                   color: ok || current ? Colors.black : Colors.white70,

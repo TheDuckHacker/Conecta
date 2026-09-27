@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
 import 'package:conecta_lsb/services/avatar_service.dart';
@@ -76,7 +77,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Perfil actualizado'),
-            backgroundColor: Color(0xff2ECC71),
+            backgroundColor: AppColors.success,
           ),
         );
       }
@@ -111,7 +112,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Foto de perfil actualizada'),
-          backgroundColor: Color(0xff2ECC71),
+          backgroundColor: AppColors.success,
         ),
       );
     } catch (e) {
@@ -210,18 +211,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     final img = _imageProvider();
     return Scaffold(
-      backgroundColor: const Color(0xffF5F9FC),
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xff121B35)),
+          icon: const Icon(Icons.arrow_back_rounded, color: AppColors.ink),
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           'Mi Perfil',
           style: TextStyle(
-            color: Color(0xff121B35),
+            color: AppColors.ink,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -237,7 +238,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 : const Text(
                     'Guardar',
                     style: TextStyle(
-                      color: Color(0xff37C8F2),
+                      color: AppColors.brand,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -246,7 +247,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       body: _isLoading
           ? const Center(
-              child: CircularProgressIndicator(color: Color(0xff37C8F2)),
+              child: CircularProgressIndicator(color: AppColors.brand),
             )
           : SingleChildScrollView(
               padding: const EdgeInsets.all(24),
@@ -258,7 +259,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: [
                         CircleAvatar(
                           radius: 60,
-                          backgroundColor: const Color(0xffCDEFF7),
+                          backgroundColor: AppColors.brandSoft,
                           backgroundImage: img,
                           onBackgroundImageError:
                               img != null ? (_, __) {} : null,
@@ -273,7 +274,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       style: const TextStyle(
                                         fontSize: 45,
                                         fontWeight: FontWeight.bold,
-                                        color: Color(0xff121B35),
+                                        color: AppColors.ink,
                                       ),
                                     )
                                   : null),
@@ -282,7 +283,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           bottom: 0,
                           right: 0,
                           child: Material(
-                            color: const Color(0xff37C8F2),
+                            color: AppColors.brand,
                             shape: const CircleBorder(),
                             child: IconButton(
                               icon: const Icon(Icons.camera_alt,
@@ -344,7 +345,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         controller: c,
         enabled: enabled,
         decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: const Color(0xff37C8F2)),
+          prefixIcon: Icon(icon, color: AppColors.brand),
           labelText: label,
           border: InputBorder.none,
           contentPadding:

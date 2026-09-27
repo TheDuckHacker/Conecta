@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:appwrite/models.dart';
 import 'package:conecta_lsb/screens/chat_detail.dart';
 import 'package:conecta_lsb/screens/user_profile.dart';
@@ -26,9 +27,9 @@ class _ChatsTabState extends State<ChatsTab> {
   List<Document> _contactUsers = [];
   bool _isLoading = true;
 
-  static const _accent = Color(0xff37C8F2);
-  static const _textDark = Color(0xff1A3A4A);
-  static const _textMuted = Color(0xff6B9BB0);
+  static const _accent = AppColors.brand;
+  static const _textDark = AppColors.ink;
+  static const _textMuted = AppColors.inkMuted;
 
   @override
   void initState() {
@@ -144,7 +145,7 @@ class _ChatsTabState extends State<ChatsTab> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Contacto eliminado'),
-              backgroundColor: Color(0xff37C8F2),
+              backgroundColor: AppColors.brand,
             ),
           );
         }
@@ -508,7 +509,7 @@ class _ChatsTabState extends State<ChatsTab> {
                   children: [
                     CircleAvatar(
                       radius: 28,
-                      backgroundColor: const Color(0xffCDEFF7),
+                      backgroundColor: AppColors.brandSoft,
                       backgroundImage:
                           avatar.isNotEmpty ? NetworkImage(avatar) : null,
                       onBackgroundImageError:
@@ -654,7 +655,7 @@ class _ChatsTabState extends State<ChatsTab> {
                   children: [
                     CircleAvatar(
                       radius: 26,
-                      backgroundColor: const Color(0xffCDEFF7),
+                      backgroundColor: AppColors.brandSoft,
                       backgroundImage:
                           avatar.isNotEmpty ? NetworkImage(avatar) : null,
                       onBackgroundImageError:
@@ -678,8 +679,8 @@ class _ChatsTabState extends State<ChatsTab> {
                         height: 13,
                         decoration: BoxDecoration(
                           color: isOnline
-                              ? const Color(0xff2ECC71)
-                              : const Color(0xffB0BEC5),
+                              ? AppColors.success
+                              : AppColors.border,
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
                         ),
@@ -707,7 +708,7 @@ class _ChatsTabState extends State<ChatsTab> {
                             : (isOnline ? 'En línea' : 'Desconectado'),
                         style: TextStyle(
                           color: isOnline && phone.isEmpty
-                              ? const Color(0xff2ECC71)
+                              ? AppColors.success
                               : _textMuted,
                           fontSize: 13,
                         ),

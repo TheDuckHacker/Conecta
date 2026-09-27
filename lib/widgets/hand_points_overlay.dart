@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 
 import 'package:conecta_lsb/services/sign_detection_service.dart';
 
@@ -63,7 +64,7 @@ class _HandPointsPainter extends CustomPainter {
     final mapped = frame.points.map(map).toList();
 
     final bone = Paint()
-      ..color = const Color(0xff27C7D9).withValues(alpha: 0.75)
+      ..color = AppColors.brandBright.withValues(alpha: 0.75)
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round;
 
@@ -80,10 +81,10 @@ class _HandPointsPainter extends CustomPainter {
       canvas.drawLine(a, c, bone);
     }
 
-    final handDot = Paint()..color = const Color(0xff2ECC71);
+    final handDot = Paint()..color = AppColors.successBright;
     final bodyDot = Paint()..color = Colors.white.withValues(alpha: 0.7);
     final halo = Paint()
-      ..color = const Color(0xff2ECC71).withValues(alpha: 0.25);
+      ..color = AppColors.successBright.withValues(alpha: 0.25);
 
     for (var i = 0; i < mapped.length; i++) {
       final p = mapped[i];
@@ -117,11 +118,11 @@ class _HandPointsPainter extends CustomPainter {
     }
 
     final finger = Paint()
-      ..color = const Color(0xff2ECC71)
+      ..color = AppColors.successBright
       ..strokeWidth = 2.5
       ..strokeCap = StrokeCap.round;
     final joint = Paint()..color = Colors.white;
-    final tip = Paint()..color = const Color(0xff2ECC71);
+    final tip = Paint()..color = AppColors.successBright;
 
     for (final hand in frame.hands) {
       final pts = hand.map(map).toList();

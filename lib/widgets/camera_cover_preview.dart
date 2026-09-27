@@ -1,5 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 
 /// Vista de cámara sin aplastar (cubre pantalla manteniendo proporción).
 class CameraCoverPreview extends StatelessWidget {
@@ -15,7 +16,7 @@ class CameraCoverPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!controller.value.isInitialized) {
-      return const ColoredBox(color: Color(0xff0F172A));
+      return const ColoredBox(color: AppColors.callBg);
     }
 
     final preview = controller.value.previewSize;

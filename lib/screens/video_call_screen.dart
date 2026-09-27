@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:conecta_lsb/theme/app_theme.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:conecta_lsb/services/auth_service.dart';
@@ -721,7 +722,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     final name = widget.userName.isNotEmpty ? widget.userName : 'Contacto';
 
     return Scaffold(
-      backgroundColor: const Color(0xff0F172A),
+      backgroundColor: AppColors.callBg,
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -785,7 +786,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                         style: TextStyle(
                           color: _callRejected
                               ? Colors.redAccent
-                              : const Color(0xff37C8F2),
+                              : AppColors.brandBright,
                           fontSize: 13,
                         ),
                       ),
@@ -824,7 +825,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                     color: (_role == CallUserRole.deaf
                             ? _handsVisible
                             : _remoteVideoReady)
-                        ? const Color(0xff2ECC71)
+                        ? AppColors.successBright
                         : Colors.white70,
                     size: 16,
                   ),
@@ -857,7 +858,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.55),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xff37C8F2), width: 1),
+                  border: Border.all(color: AppColors.brandBright, width: 1),
                 ),
                 child: const Text(
                   SignGuide.liveHint,
@@ -971,7 +972,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         width: 112,
         height: 168,
         decoration: BoxDecoration(
-          color: const Color(0xff0F172A),
+          color: AppColors.callBg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white70, width: 2),
           boxShadow: [
@@ -1108,7 +1109,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     bool compact = false,
   }) {
     return ColoredBox(
-      color: const Color(0xff0F172A),
+      color: AppColors.callBg,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final tight = compact ||
@@ -1135,7 +1136,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                       if (avatarLetter != null)
                         CircleAvatar(
                           radius: avatarR,
-                          backgroundColor: const Color(0xff37C8F2),
+                          backgroundColor: AppColors.brandBright,
                           child: Text(
                             avatarLetter,
                             style: TextStyle(
@@ -1171,7 +1172,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   Widget _callHelpBtn() {
     return Material(
-      color: const Color(0xff27C7D9),
+      color: AppColors.brandBright,
       borderRadius: BorderRadius.circular(22),
       child: InkWell(
         borderRadius: BorderRadius.circular(22),
@@ -1207,7 +1208,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xff1E293B),
+      backgroundColor: AppColors.callSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1291,7 +1292,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                       SignGuide.liveHint,
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Color(0xff37C8F2),
+                        color: AppColors.brandBright,
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1338,11 +1339,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                                   height: 18,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    color: Color(0xff37C8F2),
+                                    color: AppColors.brandBright,
                                   ),
                                 )
                               : const Icon(Icons.send_rounded,
-                                  color: Color(0xff37C8F2)),
+                                  color: AppColors.brandBright),
                         ),
                       ),
                       onSubmitted: (_) => ask(),
@@ -1354,7 +1355,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xff37C8F2)),
+                          border: Border.all(color: AppColors.brandBright),
                         ),
                         child: Text(
                           answer,
@@ -1399,7 +1400,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xff37C8F2) : Colors.transparent,
+          color: selected ? AppColors.brandBright : Colors.transparent,
           borderRadius: BorderRadius.circular(24),
         ),
         child: Text(
@@ -1448,7 +1449,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: hasText
-                  ? const Color(0xff37C8F2)
+                  ? AppColors.brandBright
                   : Colors.white24,
               width: 1.5,
             ),
@@ -1470,7 +1471,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                         ? Icons.sign_language_rounded
                         : Icons.closed_caption_rounded,
                     color: hasText
-                        ? const Color(0xff37C8F2)
+                        ? AppColors.brandBright
                         : Colors.white54,
                     size: 18,
                   ),
@@ -1479,7 +1480,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                     header,
                     style: TextStyle(
                       color: hasText
-                          ? const Color(0xff37C8F2)
+                          ? AppColors.brandBright
                           : Colors.white54,
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
