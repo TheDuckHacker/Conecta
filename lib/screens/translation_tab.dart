@@ -11,6 +11,7 @@ import 'package:conecta_lsb/services/sign_guide.dart';
 import 'package:conecta_lsb/services/voice_bridge_service.dart';
 import 'package:conecta_lsb/widgets/camera_cover_preview.dart';
 import 'package:conecta_lsb/widgets/hand_points_overlay.dart';
+import 'package:conecta_lsb/widgets/ui_kit.dart';
 
 /// Pestaña de traducción: cámara + señas → frase + voz.
 class TranslationTab extends StatefulWidget {
@@ -35,7 +36,10 @@ class _TranslationTabState extends State<TranslationTab> {
   bool _bodyVisible = false;
   String _liveStatus = 'Iniciando...';
   String _hint = 'Haz señas: se armará la frase';
-  String _signsLine = '';
+  List<String> _signs = const [];
+
+  /// Sube con cada seña reconocida: dispara el destello + vibración.
+  int _signCount = 0;
   String _sentence = '';
   String _agentSource = 'local';
   DateTime _lastSpeak = DateTime.fromMillisecondsSinceEpoch(0);
@@ -53,7 +57,7 @@ class _TranslationTabState extends State<TranslationTab> {
     final out = _agent.latest.value;
     if (out == null || !mounted) return;
     setState(() {
-      _signsLine = out.signs.join(' → ');
+      _signs = out.signs;
       _sentence = out.sentence;
       _agentSource = out.source;
     });
@@ -172,16 +176,17 @@ class _TranslationTabState extends State<TranslationTab> {
       }
 
       if (result.phrase.isEmpty) {
-        if (_sentence.isEmpty) {
-          final h = !_handsVisible
-              ? 'Buscando manos… cuerpo visible, luz buena'
-              : result.candidate.isNotEmpty
-                  ? 'Detectando: ${SignGuide.labelFor(result.candidate)}…'
-                  : SignGuide.liveHint;
-          if (_hint != h) {
-            _hint = h;
-            changed = true;
-          }
+        // Estado en vivo sobre la cámara (siempre, aunque ya haya frase).
+        final h = !_handsVisible
+            ? (_bodyVisible
+                ? 'Sube las manos al pecho'
+                : 'Colócate de frente, con el pecho visible')
+            : result.candidate.isNotEmpty
+                ? 'Detectando «${SignGuide.labelFor(result.candidate)}»…'
+                : 'Manos detectadas · haz la seña';
+        if (_hint != h) {
+          _hint = h;
+          changed = true;
         }
         if (changed && mounted) setState(() {});
         return;
@@ -192,10 +197,11 @@ class _TranslationTabState extends State<TranslationTab> {
       if (!mounted) return;
 
       setState(() {
-        _signsLine = agentOut.signs.join(' → ');
+        _signs = agentOut.signs;
         _sentence = agentOut.sentence;
         _agentSource = agentOut.source;
-        _hint = SignGuide.labelFor(result.phrase);
+        _hint = 'Seña reconocida: ${SignGuide.labelFor(result.phrase)}';
+        _signCount++;
       });
 
       // Leer recién cuando la frase queda completa (evita cortar cada seña)
@@ -210,7 +216,7 @@ class _TranslationTabState extends State<TranslationTab> {
     _spokenSentence = '';
     _agent.clear();
     setState(() {
-      _signsLine = '';
+      _signs = const [];
       _sentence = '';
       _hint = 'Haz señas frente a la cámara';
     });
@@ -374,254 +380,300 @@ class _TranslationTabState extends State<TranslationTab> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: Stack(
-                fit: StackFit.expand,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpace.lg,
+        AppSpace.lg,
+        AppSpace.lg,
+        AppSpace.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: _buildCameraCard()),
+          const SizedBox(height: AppSpace.md),
+          _buildSentenceCard(),
+        ],
+      ),
+    );
+  }
+
+  /// Cámara: solo estado en vivo (la frase vive abajo, sin duplicarla).
+  Widget _buildCameraCard() {
+    final ready = _ready && _camera != null;
+    return SignFlash(
+      trigger: _signCount,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (ready)
+              CameraCoverPreview(controller: _camera!)
+            else
+              ColoredBox(
+                color: AppColors.callBg,
+                child: _denied
+                    ? const EmptyState(
+                        dark: true,
+                        illustration: Illustrations.cameraPermission,
+                        title: 'Necesitamos tu cámara',
+                        message: 'Actívala en Ajustes para traducir tus '
+                            'señas LSB en vivo.',
+                        actionLabel: 'Abrir ajustes',
+                        actionIcon: Icons.settings_rounded,
+                        onAction: openAppSettings,
+                      )
+                    : const Center(
+                        child: CircularProgressIndicator(
+                          color: AppColors.brandBright,
+                        ),
+                      ),
+              ),
+            if (ready)
+              HandPointsOverlay(frames: _sign.points, mirror: _isFront),
+            Positioned(
+              top: AppSpace.md,
+              left: AppSpace.md,
+              right: AppSpace.md,
+              child: Row(
                 children: [
-                  if (_ready && _camera != null)
-                    CameraCoverPreview(controller: _camera!)
-                  else
-                    Container(
-                      color: AppColors.ink,
-                      child: Center(
-                        child: _denied
-                            ? const Padding(
-                                padding: EdgeInsets.all(24),
-                                child: Text(
-                                  'Ve a Ajustes y permite la cámara para detectar señas LSB.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(color: Colors.white70),
-                                ),
-                              )
-                            : const CircularProgressIndicator(
-                                color: AppColors.brand,
-                              ),
-                      ),
+                  Flexible(child: _liveBadge()),
+                  if (_sign.fingerTracking) ...[
+                    const SizedBox(width: AppSpace.sm),
+                    _pill(
+                      icon: Icons.back_hand_outlined,
+                      label: 'Dedos',
+                      color: AppColors.callBg.withValues(alpha: 0.7),
                     ),
-                  if (_ready && _camera != null)
-                    HandPointsOverlay(
-                      frames: _sign.points,
-                      mirror: _isFront,
-                    ),
-                  Positioned(
-                    top: 14,
-                    left: 14,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: _handsVisible
-                            ? AppColors.success.withValues(alpha: 0.9)
-                            : Colors.red.withValues(alpha: 0.85),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          const CircleAvatar(
-                              radius: 4, backgroundColor: Colors.white),
-                          const SizedBox(width: 6),
-                          Text(
-                            _handsVisible
-                                ? 'LSB EN VIVO'
-                                : (_bodyVisible ? 'DETECTANDO' : _liveStatus),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                  ],
+                  const Spacer(),
+                  _cameraAction(
+                    icon: Icons.menu_book_rounded,
+                    tooltip: 'Guía de señas',
+                    onPressed: _showSignGuide,
                   ),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          onPressed: _showSignGuide,
-                          tooltip: 'Guía de señas',
-                          icon: const Icon(Icons.menu_book_rounded,
-                              color: Colors.white),
-                        ),
-                        IconButton(
-                          onPressed: _flip,
-                          icon: const Icon(Icons.flip_camera_ios_rounded,
-                              color: Colors.white),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    bottom: 16,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.82),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.brand),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            _sentence.isEmpty
-                                ? 'FRASE DEL AGENTE IA'
-                                : 'FRASE · ${_agentSource == 'openai' ? 'GPT' : 'AGENTE'}',
-                            style: const TextStyle(
-                              color: AppColors.brand,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _sentence.isNotEmpty ? _sentence : _hint,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              height: 1.25,
-                            ),
-                          ),
-                          if (_signsLine.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              _signsLine,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
+                  const SizedBox(width: AppSpace.sm),
+                  _cameraAction(
+                    icon: Icons.cameraswitch_rounded,
+                    tooltip: 'Cambiar cámara',
+                    onPressed: _flip,
                   ),
                 ],
               ),
             ),
-          ),
-        ),
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.auto_awesome,
-                      color: AppColors.brand, size: 18),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'PALABRAS → FRASE',
-                      style: TextStyle(
-                        color: AppColors.inkMuted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.8,
-                      ),
+            if (ready)
+              Positioned(
+                left: AppSpace.md,
+                right: AppSpace.md,
+                bottom: AppSpace.md,
+                child: Semantics(
+                  liveRegion: true,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpace.lg,
+                      vertical: AppSpace.md,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.callBg.withValues(alpha: 0.82),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _handsVisible
+                              ? Icons.front_hand_rounded
+                              : Icons.accessibility_new_rounded,
+                          color: _handsVisible
+                              ? AppColors.successBright
+                              : Colors.white70,
+                          size: 22,
+                        ),
+                        const SizedBox(width: AppSpace.md),
+                        Expanded(
+                          child: Text(
+                            _hint,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              height: 1.25,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  Text(
-                    _agentSource == 'gemini' ? 'IA' : 'Local',
-                    style: TextStyle(
-                      color: _agentSource == 'gemini'
-                          ? AppColors.success
-                          : Colors.orange,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _sentence.isNotEmpty ? _sentence : _hint,
-                style: const TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
                 ),
               ),
-              if (_signsLine.isNotEmpty) ...[
-                const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _liveBadge() {
+    final live = _handsVisible;
+    return _pill(
+      icon: live ? Icons.circle : Icons.search_rounded,
+      iconSize: live ? 10 : 16,
+      label: live
+          ? 'LSB en vivo'
+          : (_bodyVisible ? 'Buscando manos' : _liveStatus),
+      color: live ? AppColors.success : AppColors.callBg.withValues(alpha: 0.7),
+    );
+  }
+
+  Widget _pill({
+    required IconData icon,
+    required String label,
+    required Color color,
+    double iconSize = 16,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.md,
+        vertical: AppSpace.sm,
+      ),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: iconSize),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cameraAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    return IconButton.filled(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      style: IconButton.styleFrom(
+        backgroundColor: AppColors.callBg.withValues(alpha: 0.7),
+        foregroundColor: Colors.white,
+        minimumSize: const Size(kMinTouch, kMinTouch),
+      ),
+      icon: Icon(icon),
+    );
+  }
+
+  /// Frase armada + señas como chips + acciones.
+  Widget _buildSentenceCard() {
+    final t = Theme.of(context).textTheme;
+    final hasSentence = _sentence.isNotEmpty;
+    final fromAi = _agentSource != 'local';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpace.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
                 Text(
-                  'Señas: $_signsLine',
-                  style: const TextStyle(
+                  'Tu frase',
+                  style: t.labelLarge?.copyWith(
                     color: AppColors.inkMuted,
-                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
                   ),
+                ),
+                const Spacer(),
+                if (hasSentence)
+                  Tooltip(
+                    message: fromAi
+                        ? 'Frase mejorada por el agente IA'
+                        : 'Frase armada en el teléfono (sin conexión a IA)',
+                    child: Chip(
+                      visualDensity: VisualDensity.compact,
+                      avatar: Icon(
+                        fromAi ? Icons.auto_awesome : Icons.phone_android,
+                        size: 16,
+                        color: AppColors.ink,
+                      ),
+                      label: Text(fromAi ? 'IA' : 'Local'),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppSpace.sm),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                hasSentence
+                    ? _sentence
+                    : 'Haz una seña y aquí aparecerá la frase',
+                style:
+                    (hasSentence ? t.headlineSmall : t.titleMedium)?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: hasSentence ? AppColors.ink : AppColors.inkMuted,
+                  height: 1.25,
+                ),
+              ),
+            ),
+            if (_signs.isNotEmpty) ...[
+              const SizedBox(height: AppSpace.md),
+              Wrap(
+                spacing: AppSpace.sm,
+                runSpacing: AppSpace.sm,
+                children: [
+                  for (final sgn in _signs)
+                    Chip(
+                      visualDensity: VisualDensity.compact,
+                      avatar: Icon(
+                        SignGuide.iconFor(sgn),
+                        size: 16,
+                        color: AppColors.ink,
+                      ),
+                      label: Text(SignGuide.labelFor(sgn)),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: AppSpace.lg),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed:
+                        hasSentence ? () => _voice.speak(_sentence) : null,
+                    icon: const Icon(Icons.volume_up_rounded),
+                    label: const Text('Leer en voz alta'),
+                  ),
+                ),
+                const SizedBox(width: AppSpace.md),
+                OutlinedButton.icon(
+                  onPressed: hasSentence ? _clear : null,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Nueva'),
                 ),
               ],
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        final t =
-                            _sentence.isNotEmpty ? _sentence : _hint;
-                        if (t.isEmpty) return;
-                        _voice.speak(t);
-                      },
-                      icon: const Icon(Icons.volume_up_rounded),
-                      label: const Text('Escuchar'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.brand,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  OutlinedButton(
-                    onPressed: _clear,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.brand,
-                      side: const BorderSide(color: AppColors.brand),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: const Text('Limpiar'),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
