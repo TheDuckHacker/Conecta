@@ -78,10 +78,13 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   String _localCaption = '';
   String _remoteCaption = '';
   String _displayCaption = '';
+
   /// Origen del subtítulo en pantalla: sign | speech | typed.
   String _displaySource = '';
+
   /// Señas detectadas por el tracker que forman la frase ("Hola → ¿Cómo estás?").
   String _displaySigns = '';
+
   /// Seña que el tracker está leyendo (aún sin confirmar).
   String _candidate = '';
   String _statusHint = 'Iniciando cámara...';
@@ -179,8 +182,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       desc,
       ResolutionPreset.medium,
       enableAudio: false,
-      imageFormatGroup:
-          Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+      imageFormatGroup: Platform.isAndroid
+          ? ImageFormatGroup.nv21
+          : ImageFormatGroup.bgra8888,
     );
     _camera = next;
     try {
@@ -321,7 +325,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   Future<void> _startWebRtc({bool enableLocalVideo = true}) async {
     final me = widget.currentUserId;
-    if (me == null || me.isEmpty || _roomId.isEmpty || _roomId.startsWith('solo')) {
+    if (me == null ||
+        me.isEmpty ||
+        _roomId.isEmpty ||
+        _roomId.startsWith('solo')) {
       return;
     }
     try {
@@ -877,7 +884,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           Positioned(
             left: 12,
             right: 12,
-            bottom: _role == CallUserRole.deaf ? 160 : 120,
+            bottom: _role == CallUserRole.deaf ? 184 : 136,
             child: _buildLiveSubtitles(),
           ),
 
@@ -886,7 +893,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             Positioned(
               left: 0,
               right: 0,
-              bottom: 108,
+              bottom: 128,
               child: SizedBox(
                 height: 40,
                 child: ListView.separated(
@@ -920,6 +927,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 children: [
                   _btn(
                     icon: _isMuted ? Icons.mic_off : Icons.mic,
+                    label: _isMuted ? 'Activar mic' : 'Silenciar',
                     active: _isMuted,
                     onTap: () async {
                       setState(() => _isMuted = !_isMuted);
@@ -933,6 +941,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                   ),
                   _btn(
                     icon: _isVideoOff ? Icons.videocam_off : Icons.videocam,
+                    label: _isVideoOff ? 'Encender cámara' : 'Apagar cámara',
                     active: _isVideoOff,
                     onTap: () async {
                       setState(() => _isVideoOff = !_isVideoOff);
@@ -941,11 +950,13 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                   ),
                   _btn(
                     icon: Icons.cameraswitch_rounded,
+                    label: 'Girar cámara',
                     onTap: _flipCamera,
                   ),
                   _btn(
                     icon: Icons.call_end_rounded,
-                    color: Colors.redAccent,
+                    label: 'Colgar',
+                    color: AppColors.danger,
                     size: 64,
                     onTap: () => Navigator.pop(context),
                   ),
@@ -1089,9 +1100,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       );
     }
     return _placeholder(
-      icon: _peerConnected
-          ? Icons.videocam_rounded
-          : Icons.hourglass_top_rounded,
+      icon:
+          _peerConnected ? Icons.videocam_rounded : Icons.hourglass_top_rounded,
       label: _peerConnected
           ? 'Conectando video…'
           : (widget.isCaller ? 'Llamando…' : 'Conectando…'),
@@ -1229,8 +1239,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 });
               } catch (_) {
                 setModal(() {
-                  answer =
-                      'Tips rápidos en llamada:\n'
+                  answer = 'Tips rápidos en llamada:\n'
                       '• Hola: mano bien arriba + vaivén\n'
                       '• Cómo estás: mano cerca de la cara\n'
                       '• Yo / Bien: pecho quieto\n'
@@ -1312,8 +1321,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                                   Text(s, style: const TextStyle(fontSize: 12)),
                               onPressed: busy ? null : () => ask(s),
                               backgroundColor: Colors.white12,
-                              labelStyle:
-                                  const TextStyle(color: Colors.white),
+                              labelStyle: const TextStyle(color: Colors.white),
                             ),
                           )
                           .toList(),
@@ -1395,22 +1403,30 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   Widget _roleBtn(String label, CallUserRole role) {
     final selected = _role == role;
-    return GestureDetector(
-      onTap: () => _setRole(role),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.brandBright : Colors.transparent,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: selected ? Colors.black : Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 11,
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Modo $label',
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: () => _setRole(role),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: kMinTouch),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.brandBright : Colors.transparent,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: selected ? AppColors.onBrandBright : Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
           ),
         ),
       ),
@@ -1448,9 +1464,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             color: Colors.black.withValues(alpha: 0.82),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: hasText
-                  ? AppColors.brandBright
-                  : Colors.white24,
+              color: hasText ? AppColors.brandBright : Colors.white24,
               width: 1.5,
             ),
             boxShadow: [
@@ -1470,18 +1484,14 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                     (hasText && _displaySource == 'sign') || readingSigns
                         ? Icons.sign_language_rounded
                         : Icons.closed_caption_rounded,
-                    color: hasText
-                        ? AppColors.brandBright
-                        : Colors.white54,
+                    color: hasText ? AppColors.brandBright : Colors.white54,
                     size: 18,
                   ),
                   const SizedBox(width: 6),
                   Text(
                     header,
                     style: TextStyle(
-                      color: hasText
-                          ? AppColors.brandBright
-                          : Colors.white54,
+                      color: hasText ? AppColors.brandBright : Colors.white54,
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 1.2,
@@ -1552,28 +1562,53 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     );
   }
 
+  /// Control de llamada: círculo táctil + texto visible debajo (no solo
+  /// ícono) + tooltip y nombre para lector de pantalla.
   Widget _btn({
     required IconData icon,
+    required String label,
     required VoidCallback onTap,
     bool active = false,
     Color? color,
-    double size = 52,
+    double size = kMainTouch,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: color ?? (active ? Colors.white : Colors.white24),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          icon,
-          color: color != null
-              ? Colors.white
-              : (active ? Colors.black : Colors.white),
-          size: 24,
+    final bg = color ?? (active ? Colors.white : Colors.white24);
+    final fg =
+        color != null ? Colors.white : (active ? AppColors.ink : Colors.white);
+    return Semantics(
+      button: true,
+      toggled: color == null ? active : null,
+      label: label,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: label,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Material(
+              color: bg,
+              shape: const CircleBorder(),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: onTap,
+                child: SizedBox(
+                  width: size,
+                  height: size,
+                  child: Icon(icon, color: fg, size: 26),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+              ),
+            ),
+          ],
         ),
       ),
     );
