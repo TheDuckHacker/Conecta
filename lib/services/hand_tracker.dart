@@ -100,7 +100,9 @@ class HandTracker {
     try {
       _plugin = HandLandmarkerPlugin.create(
         numHands: 2,
-        minHandDetectionConfidence: 0.5,
+        // 0.4: más permisivo con webcams y poca luz; el voto de 2 frames
+        // del clasificador filtra los falsos positivos.
+        minHandDetectionConfidence: 0.4,
         delegate: HandLandmarkerDelegate.cpu,
       );
     } catch (e) {

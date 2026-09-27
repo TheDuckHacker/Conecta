@@ -177,13 +177,11 @@ class _TranslationTabState extends State<TranslationTab> {
 
       if (result.phrase.isEmpty) {
         // Estado en vivo sobre la cámara (siempre, aunque ya haya frase).
-        final h = !_handsVisible
-            ? (_bodyVisible
-                ? 'Sube las manos al pecho'
-                : 'Colócate de frente, con el pecho visible')
-            : result.candidate.isNotEmpty
-                ? 'Detectando «${SignGuide.labelFor(result.candidate)}»…'
-                : 'Manos detectadas · haz la seña';
+        // Calibración: el diagnóstico dice qué corregir (luz, distancia…).
+        final advice = _sign.diagnostics.value.advice;
+        final h = result.candidate.isNotEmpty
+            ? 'Detectando «${SignGuide.labelFor(result.candidate)}»…'
+            : (advice ?? 'Manos detectadas · haz la seña');
         if (_hint != h) {
           _hint = h;
           changed = true;
@@ -439,14 +437,6 @@ class _TranslationTabState extends State<TranslationTab> {
               child: Row(
                 children: [
                   Flexible(child: _liveBadge()),
-                  if (_sign.fingerTracking) ...[
-                    const SizedBox(width: AppSpace.sm),
-                    _pill(
-                      icon: Icons.back_hand_outlined,
-                      label: 'Dedos',
-                      color: AppColors.callBg.withValues(alpha: 0.7),
-                    ),
-                  ],
                   const Spacer(),
                   _cameraAction(
                     icon: Icons.menu_book_rounded,
@@ -462,6 +452,13 @@ class _TranslationTabState extends State<TranslationTab> {
                 ],
               ),
             ),
+            if (ready)
+              Positioned(
+                top: AppSpace.md + kMinTouch + AppSpace.sm,
+                left: AppSpace.md,
+                right: AppSpace.md,
+                child: _calibrationChecklist(),
+              ),
             if (ready)
               Positioned(
                 left: AppSpace.md,
@@ -508,6 +505,70 @@ class _TranslationTabState extends State<TranslationTab> {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Lista de calibración en vivo: cuerpo · manos · luz. Verde = OK.
+  Widget _calibrationChecklist() {
+    return ValueListenableBuilder<TrackerDiagnostics>(
+      valueListenable: _sign.diagnostics,
+      builder: (context, d, _) {
+        final bodyLabel = d.body
+            ? 'Cuerpo'
+            : (d.bodyFromMemory ? 'Cuerpo (memoria)' : 'Sin hombros');
+        final handsLabel = !_sign.fingerTracking
+            ? (_handsVisible ? 'Manos' : 'Sin manos')
+            : (d.hands == 0
+                ? 'Sin manos'
+                : (d.hands == 1 ? '1 mano · dedos' : '2 manos · dedos'));
+        final handsOk = _sign.fingerTracking ? d.hands > 0 : _handsVisible;
+        final lightLabel =
+            d.luma < 0 ? 'Luz…' : (d.lowLight ? 'Poca luz' : 'Luz');
+        return Wrap(
+          spacing: AppSpace.sm,
+          runSpacing: AppSpace.xs,
+          children: [
+            _check(bodyLabel, d.bodyOk, Icons.accessibility_new_rounded),
+            _check(handsLabel, handsOk, Icons.back_hand_outlined),
+            _check(lightLabel, !d.lowLight, Icons.light_mode_outlined),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _check(String label, bool ok, IconData icon) {
+    return Semantics(
+      label: '$label: ${ok ? 'bien' : 'revisar'}',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.sm + 2,
+          vertical: AppSpace.xs + 1,
+        ),
+        decoration: BoxDecoration(
+          color:
+              ok ? AppColors.success : AppColors.callBg.withValues(alpha: 0.75),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          border: ok ? null : Border.all(color: Colors.white38),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(ok ? Icons.check_rounded : icon,
+                color: Colors.white, size: 15),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
         ),
       ),

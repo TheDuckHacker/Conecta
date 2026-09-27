@@ -84,6 +84,61 @@ class HandPointsFrame {
   static const List<int> handIndexes = [2, 3, 4, 5, 8, 9, 10, 11];
 }
 
+/// Estado del tracker para calibrar en vivo: qué ve la cámara ahora.
+class TrackerDiagnostics {
+  /// ML Kit ve hombros y cara en este frame.
+  final bool body;
+
+  /// No se ven los hombros, pero se usa la última referencia (≤ 4 s).
+  final bool bodyFromMemory;
+
+  /// Manos que ve MediaPipe (0 si el tracker de dedos no está activo).
+  final int hands;
+
+  /// Brillo medio de la imagen (0-255). -1 = aún sin medir.
+  final double luma;
+
+  /// MediaPipe activo: solo entonces [hands] es confiable.
+  final bool fingerTracking;
+
+  const TrackerDiagnostics({
+    this.body = false,
+    this.bodyFromMemory = false,
+    this.hands = 0,
+    this.luma = -1,
+    this.fingerTracking = false,
+  });
+
+  bool get lowLight => luma >= 0 && luma < 70;
+  bool get bodyOk => body || bodyFromMemory;
+
+  /// Lo más importante a corregir, en orden. null = todo bien.
+  String? get advice {
+    if (lowLight) {
+      return 'Poca luz: enciende una luz o ponte frente a una ventana';
+    }
+    if (!bodyOk && hands > 0) {
+      return 'Aléjate un poco: necesito ver tus hombros';
+    }
+    if (!bodyOk) return 'Colócate de frente, con cabeza y hombros visibles';
+    if (fingerTracking && hands == 0) {
+      return 'Sube una mano a la altura del pecho';
+    }
+    return null;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is TrackerDiagnostics &&
+      other.body == body &&
+      other.bodyFromMemory == bodyFromMemory &&
+      other.hands == hands &&
+      (other.luma - luma).abs() < 8;
+
+  @override
+  int get hashCode => Object.hash(body, bodyFromMemory, hands, luma ~/ 8);
+}
+
 /// Detección estilo [GestureGuide](https://github.com/Innominados/LenguajeSenas_Web):
 /// 1. Mientras hay manos → acumular frames de la seña
 /// 2. Confirmar seña estable
@@ -100,6 +155,30 @@ class SignDetectionService {
 
   /// true si el tracker de dedos (MediaPipe) está activo en este dispositivo.
   bool get fingerTracking => _handTracker.available;
+
+  /// Diagnóstico en vivo para la calibración (cuerpo / manos / luz).
+  final ValueNotifier<TrackerDiagnostics> diagnostics =
+      ValueNotifier(const TrackerDiagnostics());
+
+  /// Última referencia de cuerpo SIN manos (hombros, cara, caderas). Permite
+  /// seguir clasificando si la persona se acerca y salen los hombros.
+  Pose? _bodyRef;
+  DateTime _bodyRefAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _bodyRefTtl = Duration(seconds: 4);
+  static const _bodyTypes = {
+    PoseLandmarkType.leftShoulder,
+    PoseLandmarkType.rightShoulder,
+    PoseLandmarkType.leftElbow,
+    PoseLandmarkType.rightElbow,
+    PoseLandmarkType.nose,
+    PoseLandmarkType.leftMouth,
+    PoseLandmarkType.rightMouth,
+    PoseLandmarkType.leftHip,
+    PoseLandmarkType.rightHip,
+  };
+
+  int _lumaTick = 0;
+  double _luma = -1;
   bool _busy = false;
   final List<_HandPose> _history = [];
 
@@ -191,6 +270,7 @@ class SignDetectionService {
     await _detector?.close();
     _detector = null;
     await _handTracker.stop();
+    _bodyRef = null;
     _resetGesture();
     _history.clear();
     points.value = null;
@@ -264,26 +344,60 @@ class SignDetectionService {
       }
 
       final poses = await _detector!.processImage(input);
-      if (poses.isEmpty) {
-        _onHandsMissing();
-        points.value = null;
-        return const SignDetectionResult(
-          phrase: '',
-          confidence: 0,
-          handsVisible: false,
-          status: 'buscando',
-        );
-      }
+      final hands = _handTracker.hands;
+      _sampleLuma(image);
 
       // ML Kit devuelve los puntos sobre la imagen YA rotada: en vertical hay
       // que intercambiar ancho/alto o las medidas salen deformadas.
       final rotated = _rotatedSize(image, rotation);
 
+      // Cuerpo: en vivo si se ven hombros + nariz; si no, la última
+      // referencia (solo si hay manos que clasificar y es reciente).
+      final now = DateTime.now();
+      final livePose = poses.isEmpty ? null : poses.first;
+      final liveBody = livePose != null && _hasBody(livePose);
+      if (liveBody) {
+        _bodyRef = _bodyOnly(livePose);
+        _bodyRefAt = now;
+      }
+      final memBody = !liveBody &&
+          hands.isNotEmpty &&
+          _bodyRef != null &&
+          now.difference(_bodyRefAt) < _bodyRefTtl;
+      diagnostics.value = TrackerDiagnostics(
+        body: liveBody,
+        bodyFromMemory: memBody,
+        hands: hands.length,
+        luma: _luma,
+        fingerTracking: _handTracker.available,
+      );
+
+      final pose = liveBody ? livePose : (memBody ? _bodyRef : null);
+      if (pose == null) {
+        _onHandsMissing();
+        // Sin referencia de cuerpo no se puede ubicar la seña, pero SÍ se
+        // dibujan los dedos para que la persona vea que su mano se detecta.
+        points.value = hands.isEmpty
+            ? null
+            : HandPointsFrame(
+                points: List<Offset?>.filled(12, null),
+                aspect: rotated.width / rotated.height,
+                hands: hands.map((h) => h.points).toList(),
+              );
+        return SignDetectionResult(
+          phrase: '',
+          confidence: 0,
+          handsVisible: hands.isNotEmpty,
+          bodyVisible: false,
+          status: hands.isNotEmpty ? 'manos_sin_cuerpo' : 'buscando',
+        );
+      }
+
       final sample = _HandPose.fromPose(
-        poses.first,
+        pose,
         imageWidth: rotated.width,
         imageHeight: rotated.height,
-        hands: _handTracker.hands,
+        hands: hands,
       );
 
       points.value = sample?.frame;
@@ -329,6 +443,38 @@ class SignDetectionService {
     } finally {
       _busy = false;
     }
+  }
+
+  bool _hasBody(Pose pose) {
+    bool ok(PoseLandmarkType t, double min) =>
+        (pose.landmarks[t]?.likelihood ?? 0) >= min;
+    return ok(PoseLandmarkType.leftShoulder, 0.2) &&
+        ok(PoseLandmarkType.rightShoulder, 0.2) &&
+        ok(PoseLandmarkType.nose, 0.1);
+  }
+
+  /// Copia solo con cuerpo: las muñecas viejas no deben contar como manos.
+  Pose _bodyOnly(Pose pose) => Pose(
+        landmarks: {
+          for (final e in pose.landmarks.entries)
+            if (_bodyTypes.contains(e.key)) e.key: e.value,
+        },
+      );
+
+  /// Brillo medio del plano Y (1 de cada 10 frames, muestreo disperso).
+  void _sampleLuma(CameraImage image) {
+    if (_lumaTick++ % 10 != 0 || image.planes.isEmpty) return;
+    final y = image.planes.first.bytes;
+    final ySize = min(y.length, image.width * image.height);
+    if (ySize <= 0) return;
+    var sum = 0;
+    var n = 0;
+    for (var i = 0; i < ySize; i += 97) {
+      sum += y[i];
+      n++;
+    }
+    final v = sum / n;
+    _luma = _luma < 0 ? v : _luma * 0.6 + v * 0.4;
   }
 
   String? _bestVote() {
@@ -630,8 +776,7 @@ class _HandPose {
   bool get anyHandVisible => leftOk || rightOk;
 
   /// Mano de trabajo = la más levantada de las visibles.
-  bool get _useLeft =>
-      leftOk && (!rightOk || leftHandY <= rightHandY);
+  bool get _useLeft => leftOk && (!rightOk || leftHandY <= rightHandY);
   double get activeHandX => _useLeft ? leftHandX : rightHandX;
   double get activeHandY => _useLeft ? leftHandY : rightHandY;
   double get activeSpread => _useLeft ? leftSpread : rightSpread;
@@ -651,8 +796,7 @@ class _HandPose {
       activeHandY < noseY + 0.70;
 
   bool get handNearMouth =>
-      (activeHandX - noseX).abs() < 0.55 &&
-      (activeHandY - mouthY).abs() < 0.28;
+      (activeHandX - noseX).abs() < 0.55 && (activeHandY - mouthY).abs() < 0.28;
 
   /// Media altura: entre hombro y cara (Adiós).
   bool get handUp => activeHandY < shoulderY - 0.15;
@@ -684,8 +828,7 @@ class _HandPose {
   /// Mano baja pero DELANTE del cuerpo (los brazos en reposo caen por fuera
   /// de la línea de los hombros y no deben contar como seña).
   bool get handLow =>
-      activeHandY > hipY - 0.15 &&
-      (activeHandX - shoulderCenterX).abs() < 0.40;
+      activeHandY > hipY - 0.15 && (activeHandX - shoulderCenterX).abs() < 0.40;
 
   /// Pulgar arriba con mano cerrada (Sí).
   bool get thumbUp =>

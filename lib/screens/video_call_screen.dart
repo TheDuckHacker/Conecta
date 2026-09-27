@@ -243,13 +243,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             ? SignGuide.labelFor(result.candidate)
             : '';
         // El detector nunca devuelve status 'cuerpo': se usa bodyVisible.
+        final advice = _sign.diagnostics.value.advice;
         final hint = candidate.isNotEmpty
             ? 'Detectando: $candidate…'
-            : result.handsVisible
-                ? 'Manos OK — haz la seña'
-                : result.bodyVisible
-                    ? 'Cuerpo OK — sube las manos'
-                    : SignGuide.liveHint;
+            : advice ??
+                (result.handsVisible
+                    ? 'Manos OK — haz la seña'
+                    : result.bodyVisible
+                        ? 'Cuerpo OK — sube las manos'
+                        : SignGuide.liveHint);
         if (hint != _statusHint || candidate != _candidate) {
           setState(() {
             _statusHint = hint;
